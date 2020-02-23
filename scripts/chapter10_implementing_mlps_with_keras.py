@@ -15,6 +15,9 @@ print(keras.__version__)  # 2.2.4-tf
 import numpy as np
 import os
 from matplotlib.colors import ListedColormap
+from sklearn.datasets import fetch_california_housing
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 # chapter imports
 import pandas as pd
@@ -181,7 +184,6 @@ if __name__ == '__main__':
     model.evaluate(X_test, y_test)  # loss: 0.2227 - accuracy: 0.8822
 
     # prediction
-
     X_new = X_test[:9]
     y_proba = model.predict(X_new)
     print(y_proba.round(2))  # save 2 digits for the result
@@ -211,4 +213,40 @@ if __name__ == '__main__':
         plt.title(class_names[y_test[index]], fontsize=12)
     plt.subplots_adjust(wspace=0.2, hspace=0.5)
     save_fig('fashion_mnist_images_plot', tight_layout=False)
+    # plt.show()
+
+    # Regression MLP
+
+    # data set
+    housing = fetch_california_housing()
+
+    X_train_full, X_test, y_train_full, y_test = train_test_split(housing.data, housing.target, random_state=42)
+    X_train, X_valid, y_train, y_valid = train_test_split(X_train_full, y_train_full, random_state=42)  # default 0.25
+
+    # scale
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_valid = scaler.transform(X_valid)
+    X_test = scaler.transform(X_test)
+
+    # build model
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="relu", input_shape=X_train.shape[1:]),
+        keras.layers.Dense(1)  # only one hidden unit cell for regression mission without any activation function
+    ])
+    model.compile(loss="mean_squared_error", optimizer=keras.optimizers.SGD(lr=1e-3))
+    history = model.fit(X_train, y_train, epochs=20, validation_data=(X_valid, y_valid))
+    mse_test = model.evaluate(X_test, y_test)
+    print(mse_test)  # 0.4398445256458696
+    X_new = X_test[:3]
+    y_pred = model.predict(X_new)
+    print(y_pred)  # [[0.75302976] [1.7815856 ] [3.1391568 ]] the outputs are prediction of house price
+
+    # plot
+    plt.plot(pd.DataFrame(history.history))
+    plt.grid(True)
+    plt.gca().set_ylim(0, 1)
     plt.show()
+
+    # Functional API
+
