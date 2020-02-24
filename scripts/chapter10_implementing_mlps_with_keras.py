@@ -97,6 +97,10 @@ if __name__ == '__main__':
     model.add(keras.layers.Dense(10, activation="softmax"))  # 10 kinds of labels so 10 output neuron with softmax
     # layers' param: kernel_initializer, bias_initializer and other initializer refer to https://keras.io/initializers/
 
+    keras.backend.clear_session()  # TODO: backend Not found
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+
     print(model.summary())
     '''
     Model: "sequential"
@@ -250,3 +254,98 @@ if __name__ == '__main__':
 
     # Functional API
 
+    # op random seed
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+
+    # 1. build a model like the one in cloud note "Building Complex Models Using the Functional API"
+    input_ = keras.layers.Input(shape=X_train.shape[1:])
+    hidden1 = keras.layers.Dense(30, activation="relu")(input_)
+    hidden2 = keras.layers.Dense(30, activation="relu")(hidden1)
+    concat = keras.layers.concatenate([input_, hidden2])  # two input of this layer in ONE list
+    output = keras.layers.Dense(1)(concat)
+    model = keras.models.Model(inputs=[input_], outputs=[output])
+
+    print(model.summary())
+    '''
+        Model: "model"
+    __________________________________________________________________________________________________
+    Layer (type)                    Output Shape         Param #     Connected to                     
+    ==================================================================================================
+    input_1 (InputLayer)            [(None, 8)]          0                                            
+    __________________________________________________________________________________________________
+    dense_2 (Dense)                 (None, 30)           270         input_1[0][0]                    
+    __________________________________________________________________________________________________
+    dense_3 (Dense)                 (None, 30)           930         dense_2[0][0]                    
+    __________________________________________________________________________________________________
+    concatenate (Concatenate)       (None, 38)           0           input_1[0][0]                    
+                                                                     dense_3[0][0]                    
+    __________________________________________________________________________________________________
+    dense_4 (Dense)                 (None, 1)            39          concatenate[0][0]                
+    ==================================================================================================
+    Total params: 1,239
+    Trainable params: 1,239
+    Non-trainable params: 0
+    __________________________________________________________________________________________________
+    '''
+
+    # compile, train, evaluate and predict
+    model.compile(loss="mean_squared_error", optimizer=keras.optimizers.SGD(lr=1e-3))
+    model.fit(X_train, y_train, epochs=20,
+              validation_data=(X_valid, y_valid))
+    mse_test = model.evaluate(X_test, y_test)
+    print(mse_test)  # 0.4045557499855988
+    y_pred = model.predict(X_new)
+    print(y_pred)  # [[0.4686121] [1.8569269] [3.340442 ]] three output of the house price prediction
+
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+
+    # 2. multi-input
+    input_A = keras.layers.Input(shape=[5], name="wide_input")
+    input_B = keras.layers.Input(shape=[6], name="deep_input")
+    hidden1 = keras.layers.Dense(30, activation="relu")(input_B)
+    hidden2 = keras.layers.Dense(30, activation="relu")(hidden1)
+    concat = keras.layers.concatenate([input_A, hidden2])
+    output = keras.layers.Dense(1, name="output")(concat)
+    model = keras.models.Model(inputs=[input_A, input_B], outputs=[output])  # two inputs in ONE list or tuple
+
+    # compile, train, evaluate and predict
+    model.compile(loss="mse", optimizer=keras.optimizers.SGD(lr=1e-3))
+
+    X_train_A, X_train_B = X_train[:, :5], X_train[:, 2:]  # split train data into two input
+    X_valid_A, X_valid_B = X_valid[:, :5], X_valid[:, 2:]
+    X_test_A, X_test_B = X_test[:, :5], X_test[:, 2:]
+    X_new_A, X_new_B = X_test_A[:3], X_test_B[:3]  # split test data into two input
+
+    model.fit([X_train_A, X_train_B], y_train, epochs=20,
+              validation_data=((X_valid_A, X_valid_B), y_valid))  # fit input: two input in ONE tuple or list
+    mse_test = model.evaluate((X_test_A, X_test_B), y_test)  # evaluate input: two input in ONE tuple or list
+    print(mse_test)  # 0.4249315629633822 not better than the model above
+    y_pred = model.predict((X_new_A, X_new_B))  # predict input: two input in ONE tuple or list
+    print(y_pred)  # [[0.2949911] [1.9546194] [3.4345765]]
+
+    # 3. multi-output
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+
+    input_A = keras.layers.Input(shape=[5], name="wide_input")
+    input_B = keras.layers.Input(shape=[6], name="deep_input")
+    hidden1 = keras.layers.Dense(30, activation="relu")(input_B)
+    hidden2 = keras.layers.Dense(30, activation="relu")(hidden1)
+    concat = keras.layers.concatenate([input_A, hidden2])
+    output = keras.layers.Dense(1, name="main_output")(concat)
+    aux_output = keras.layers.Dense(1, name="aux_output")(hidden2)
+    model = keras.models.Model(inputs=[input_A, input_B], outputs=[output, aux_output])  # two params
+
+    # compile, train, evaluate and predict
+    model.compile(loss=["mse", "mse"], loss_weights=[0.9, 0.1], optimizer=keras.optimizers.SGD(lr=1e-3))  # two params
+    model.fit([X_train_A, X_train_B], [y_train, y_train], epochs=20,
+              validation_data=([X_valid_A, X_valid_B], [y_valid, y_valid]))  # two input in ONE list or tuple
+    total_loss, main_loss, aux_loss = model.evaluate([X_test_A, X_test_B], [y_test, y_test])  # three losses
+    print(total_loss, main_loss, aux_loss)  # 0.4683263566142829 0.41918433 0.91364497
+    y_pred_main, y_pred_aux = model.predict([X_new_A, X_new_B])  # two output lists:
+    print(y_pred_main, y_pred_aux)  # three output of the house price prediction in two lists:
+    # [[0.9526369] [1.9273019] [2.5151913]], [[0.25949997] [1.9820837 ] [3.3337932 ]]
+
+    # The subclassing API
