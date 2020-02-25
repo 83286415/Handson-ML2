@@ -51,6 +51,24 @@ def save_fig(fig_id, tight_layout=True, fig_extension="png", resolution=300):
     plt.savefig(path, format=fig_extension, dpi=resolution)
 
 
+class WideAndDeepModel(keras.models.Model):
+    def __init__(self, units=30, activation="relu", **kwargs):
+        super().__init__(**kwargs)
+        self.hidden1 = keras.layers.Dense(units, activation=activation)
+        self.hidden2 = keras.layers.Dense(units, activation=activation)
+        self.main_output = keras.layers.Dense(1)
+        self.aux_output = keras.layers.Dense(1)
+
+    def call(self, inputs):  # call() defines the dynamic model's logic
+        input_A, input_B = inputs
+        hidden1 = self.hidden1(input_B)
+        hidden2 = self.hidden2(hidden1)
+        concat = keras.layers.concatenate([input_A, hidden2])
+        main_output = self.main_output(concat)
+        aux_output = self.aux_output(hidden2)
+        return main_output, aux_output
+
+
 if __name__ == '__main__':
 
     # Building an Image Classifier Using the Sequential API
@@ -348,4 +366,15 @@ if __name__ == '__main__':
     print(y_pred_main, y_pred_aux)  # three output of the house price prediction in two lists:
     # [[0.9526369] [1.9273019] [2.5151913]], [[0.25949997] [1.9820837 ] [3.3337932 ]]
 
-    # The subclassing API
+    # Sbclassing API
+
+    # the class WideAndDeepModel define above this main
+    model = WideAndDeepModel(30, activation="relu")
+
+    model.compile(loss="mse", loss_weights=[0.9, 0.1], optimizer=keras.optimizers.SGD(lr=1e-3))
+    history = model.fit((X_train_A, X_train_B), (y_train, y_train), epochs=10,
+                        validation_data=((X_valid_A, X_valid_B), (y_valid, y_valid)))
+    total_loss, main_loss, aux_loss = model.evaluate((X_test_A, X_test_B), (y_test, y_test))
+    print(total_loss, main_loss, aux_loss)
+    y_pred_main, y_pred_aux = model.predict((X_new_A, X_new_B))
+    print(y_pred_main, y_pred_aux)
