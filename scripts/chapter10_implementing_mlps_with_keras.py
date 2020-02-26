@@ -69,6 +69,11 @@ class WideAndDeepModel(keras.models.Model):
         return main_output, aux_output
 
 
+class PrintValTrainRatioCallback(keras.callbacks.Callback):  # define my own callbacks
+    def on_epoch_end(self, epoch, logs):
+        print("\nval/train: {:.2f}".format(logs["val_loss"] / logs["loss"]))  # to print losses at the end of each epoch
+
+
 if __name__ == '__main__':
 
     # Building an Image Classifier Using the Sequential API
@@ -366,7 +371,7 @@ if __name__ == '__main__':
     print(y_pred_main, y_pred_aux)  # three output of the house price prediction in two lists:
     # [[0.9526369] [1.9273019] [2.5151913]], [[0.25949997] [1.9820837 ] [3.3337932 ]]
 
-    # Sbclassing API
+    # Subclassing API
 
     # the class WideAndDeepModel define above this main
     model = WideAndDeepModel(30, activation="relu")
@@ -378,3 +383,83 @@ if __name__ == '__main__':
     print(total_loss, main_loss, aux_loss)
     y_pred_main, y_pred_aux = model.predict((X_new_A, X_new_B))
     print(y_pred_main, y_pred_aux)
+
+    # Saving and Restoring a Model
+
+    # save and save_wight: https://blog.csdn.net/leviopku/article/details/86612293
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+    print('Saving and Restoring a Model...')
+
+    # build a model
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="relu", input_shape=[8]),
+        keras.layers.Dense(30, activation="relu"),
+        keras.layers.Dense(1)
+    ])
+
+    # save and load
+    model.save('sequential_without_fitting.h5')  # save before fitting
+    model.save_weight('sequential_without_fitting.ckpt')  # save weight before fitting, a checkpoint file
+
+    model.compile(loss="mse", optimizer=keras.optimizers.SGD(lr=1e-3))
+    model.fit(X_train, y_train, epochs=10, validation_data=(X_valid, y_valid))
+    mse_test = model.evaluate(X_test, y_test)
+    model.save("sequential_after_fitting.h5")  # save after fitting
+    model.save_weight('sequential_after_fitting.ckpt')  # save weight after fitting, a checkpoint file
+
+    model = keras.models.load_model("sequential_after_fitting.h5")
+    y_pred = model.predict(X_new)
+    print(y_pred)
+    print(model.summary())
+
+    model = keras.models.load_model('sequential_without_fitting.h5')
+    print(model.summary())
+
+    model = keras.models.load_model('sequential_after_fitting.ckpt')
+    print(model.summary())
+
+    # Using Callbacks
+
+    print('Using Callbacks...')
+    keras.backend.clear_session()
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+
+    # build a model
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="relu", input_shape=[8]),
+        keras.layers.Dense(30, activation="relu"),
+        keras.layers.Dense(1)
+    ])
+
+    # saves the best model in each training interval
+    model.compile(loss="mse", optimizer=keras.optimizers.SGD(lr=1e-3))
+    checkpoint_cb = keras.callbacks.ModelCheckpoint("my_keras_model.h5", save_best_only=True)
+
+    history = model.fit(X_train, y_train, epochs=10,
+                        validation_data=(X_valid, y_valid),
+                        callbacks=[checkpoint_cb])  # add callbacks list to save the best model
+    model = keras.models.load_model("my_keras_model.h5")  # rollback to best model
+    mse_test = model.evaluate(X_test, y_test)
+    print(mse_test)
+
+    # early stopping used to reduce the training process time
+    model.compile(loss="mse", optimizer=keras.optimizers.SGD(lr=1e-3))
+    early_stopping_cb = keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)  # roll back to best model
+    #  patience: number of epochs with no improvement after which training will be stopped.
+    history = model.fit(X_train, y_train, epochs=100,
+                        validation_data=(X_valid, y_valid),
+                        callbacks=[checkpoint_cb, early_stopping_cb])  # callbacks list: combine two callbacks
+    mse_test = model.evaluate(X_test, y_test)
+    print(mse_test)
+
+    # self define a callback
+    val_train_ratio_cb = PrintValTrainRatioCallback()  # define a simple callback to print losses on epoch end
+    history = model.fit(X_train, y_train, epochs=3,
+                        validation_data=(X_valid, y_valid),
+                        callbacks=[val_train_ratio_cb])
+
+    # TensorBoard
+
+    #
