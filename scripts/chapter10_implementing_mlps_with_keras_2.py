@@ -15,12 +15,14 @@ print(keras.__version__)  # 2.2.4-tf
 import numpy as np
 import os
 from matplotlib.colors import ListedColormap
-from sklearn.datasets import fetch_california_housing
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 
 # chapter imports
 import pandas as pd
+from sklearn.datasets import fetch_california_housing
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from scipy.stats import reciprocal
+from sklearn.model_selection import RandomizedSearchCV
 
 # to make this notebook's output stable across runs
 np.random.seed(42)
@@ -80,6 +82,17 @@ class WideAndDeepModel(keras.models.Model):
 class PrintValTrainRatioCallback(keras.callbacks.Callback):  # define my own callbacks
     def on_epoch_end(self, epoch, logs):
         print("\nval/train: {:.2f}".format(logs["val_loss"] / logs["loss"]))  # to print losses at the end of each epoch
+
+
+def build_model(n_hidden=1, n_neurons=30, learning_rate=3e-3, input_shape=[8]):
+    model = keras.models.Sequential()
+    model.add(keras.layers.InputLayer(input_shape=input_shape))
+    for layer in range(n_hidden):
+        model.add(keras.layers.Dense(n_neurons, activation="relu"))
+    model.add(keras.layers.Dense(1))
+    optimizer = keras.optimizers.SGD(lr=learning_rate)
+    model.compile(loss="mse", optimizer=optimizer)
+    return model
 
 
 if __name__ == '__main__':
@@ -268,3 +281,50 @@ if __name__ == '__main__':
         __init__(self, log_dir='logs', histogram_freq=0, write_graph=True, write_images=False, update_freq='epoch', 
         profile_batch=2, embeddings_freq=0, embeddings_metadata=None, **kwargs)
             Initialize self.  See help(type(self)) for accurate signature.'''
+
+    # Hyperparameter Tuning
+    # NOTE: housing data is NOT good for validation of fine tuning models.
+
+    print('Hyperparameter Tuning...')
+    keras.backend.clear_session()
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+
+    # fine-tuning model built dynamically
+    keras_reg = keras.wrappers.scikit_learn.KerasRegressor(build_model)  #
+    keras_reg.fit(X_train, y_train, epochs=100,
+                  validation_data=(X_valid, y_valid),
+                  callbacks=[keras.callbacks.EarlyStopping(patience=10)])
+    mse_test = keras_reg.score(X_test, y_test)
+    print(mse_test)  # -0.3710189660390218
+    y_pred = keras_reg.predict(X_new)
+    print(y_pred)  # [0.6270607 1.7558155 3.7607713]
+
+    # cross validation: NOT Supported regression, i don't know why...
+    # kfold = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+    # results = cross_val_score(keras_reg, X_test, y_test, cv=kfold, scoring='neg_mean_squared_error')
+    # print(np.average(results))
+    #  ValueError: Supported target types are: ('binary', 'multiclass'). Got 'continuous' instead.
+
+    # fine-tuning different parameters
+    np.random.seed(42)
+    tf.random.set_random_seed(42)
+
+    param_distribs = {
+        "n_hidden": [0, 1, 2, 3],
+        "n_neurons": np.arange(1, 100),
+        "learning_rate": reciprocal(3e-4, 3e-2),
+    }
+
+    rnd_search_cv = RandomizedSearchCV(keras_reg, param_distribs, n_iter=10, cv=3, verbose=2)
+    rnd_search_cv.fit(X_train, y_train, epochs=100,
+                      validation_data=(X_valid, y_valid),
+                      callbacks=[keras.callbacks.EarlyStopping(patience=10)])  # data set is not good for validation!
+    print(rnd_search_cv.best_params_)  # {'learning_rate': 0.0033625641252688094, 'n_hidden': 2, 'n_neurons': 42}
+    print(rnd_search_cv.best_score_)  # -0.35952892616378346
+    print(rnd_search_cv.best_estimator_)  # <KerasRegressor at 0x7ff384301518>
+    print(rnd_search_cv.score(X_test, y_test))  # -0.30652404945026074
+
+    # evaluate
+    model = rnd_search_cv.best_estimator_.model
+    print(model.evaluate(X_test, y_test))  # 0.30652404945026074
