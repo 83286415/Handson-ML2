@@ -147,6 +147,7 @@ if __name__ == '__main__':
                   metrics=["accuracy"])
 
     LeakyReLU_history = model.fit(X_train, y_train, epochs=10, validation_data=(X_valid, y_valid))
+    # loss: 0.5039 - accuracy: 0.8302 - val_loss: 0.4953 - val_accuracy: 0.8346
 
     # 2. PReLU - parametric leaky ReLU
     tf.random.set_random_seed(42)
@@ -167,6 +168,7 @@ if __name__ == '__main__':
                   metrics=["accuracy"])  # the same as leaky ReLU
 
     PReLU_history = model.fit(X_train, y_train, epochs=10, validation_data=(X_valid, y_valid))
+    # loss: 0.4944 - accuracy: 0.8320 - val_loss: 0.4811 - val_accuracy: 0.8414
 
     # 3. ELU - exponential linear unit
     keras.layers.Dense(10, activation="elu")  # as same as the sigmoid, softmax defined in layers
@@ -194,6 +196,17 @@ if __name__ == '__main__':
         stds = np.std(Z, axis=0).mean()
         if layer % 100 == 0:
             print("Layer {}: mean {:.2f}, std deviation {:.2f}".format(layer, means, stds))
+            '''Layer 0: mean -0.00, std deviation 1.00
+                Layer 100: mean 0.02, std deviation 0.96
+                Layer 200: mean 0.01, std deviation 0.90
+                Layer 300: mean -0.02, std deviation 0.92
+                Layer 400: mean 0.05, std deviation 0.89
+                Layer 500: mean 0.01, std deviation 0.93
+                Layer 600: mean 0.02, std deviation 0.92
+                Layer 700: mean -0.02, std deviation 0.90
+                Layer 800: mean 0.05, std deviation 0.83
+                Layer 900: mean 0.02, std deviation 1.00
+                Train on 55000 samples, validate on 5000 samples'''  # to show mean~0, std~1
 
     # usage: the same as ELU. refer to "code: # 4" in this section of cloud note
     keras.layers.Dense(10, activation="selu", kernel_initializer="lecun_normal")  # lecun_ is used for SELU
@@ -223,3 +236,81 @@ if __name__ == '__main__':
 
     history = model.fit(X_train_scaled, y_train, epochs=5,
                         validation_data=(X_valid_scaled, y_valid))
+    # loss: 0.5621 - accuracy: 0.7992 - val_loss: 0.5708 - val_accuracy: 0.8052
+
+    # Batch Normalization
+
+    # build a model with BN layer AFTER the activation function
+    print("build a model with BN layer AFTER the activation function")
+    model = keras.models.Sequential([
+        keras.layers.Flatten(input_shape=[28, 28]),
+        keras.layers.BatchNormalization(),  # to replace the StandardScale() at the beginning this model
+        keras.layers.Dense(300, activation="relu"),
+        keras.layers.BatchNormalization(),  # add this BN layer after each layer to shift input
+        keras.layers.Dense(100, activation="relu"),
+        keras.layers.BatchNormalization(),
+        keras.layers.Dense(10, activation="softmax")
+    ])
+    print(model.summary())
+    '''_________________________________________________________________
+        Layer (type)                 Output Shape              Param #   
+        =================================================================
+        flatten_3 (Flatten)          (None, 784)               0         
+        _________________________________________________________________# 3136 = 4*784, 4 is four params for BN
+        batch_normalization (BatchNo (None, 784)               3136      # two are scale and shift params.
+        _________________________________________________________________ # two are moving average params (final)
+        dense_111 (Dense)            (None, 300)               235500    # 325500 = 784*300 + 300 bias
+        _________________________________________________________________
+        batch_normalization_1 (Batch (None, 300)               1200      # 1200 = 300*4, also 4 is four BN params
+        _________________________________________________________________
+        dense_112 (Dense)            (None, 100)               30100     # 30100 = 300*100 + 100 bias
+        _________________________________________________________________
+        batch_normalization_2 (Batch (None, 100)               400       # 400 = 100*4
+        _________________________________________________________________
+        dense_113 (Dense)            (None, 10)                1010      # 1010 = 100*10 + 10 bias
+        =================================================================
+        Total params: 271,346
+        Trainable params: 268,978       # 268978 = 235500 + 30100 + 1010 + 2368(this is the BN's scale and shift params)
+        Non-trainable params: 2,368     # 2368 = (3136+1200+400)/2, that is the moving average params are Non-trainable.
+        _________________________________________________________________'''
+
+    bn1 = model.layers[1]  # [0] is the flat layer; [1] is the first BN layer
+    print([(var.name, var.trainable) for var in bn1.variables])  # to show all four params of BN layer
+    '''[('batch_normalization/gamma:0', True), ('batch_normalization/beta:0', True), 
+    ('batch_normalization/moving_mean:0', False), ('batch_normalization/moving_variance:0', False)]'''
+    # bn1.updates  # this is used to update the moving average params in training.So no necessary to use it individually
+
+    model.compile(loss="sparse_categorical_crossentropy",
+                  optimizer=keras.optimizers.SGD(lr=1e-3),
+                  metrics=["accuracy"])
+    bn_after_act_history = model.fit(X_train, y_train, epochs=10, validation_data=(X_valid, y_valid))
+    # loss: 0.3956 - accuracy: 0.8600 - val_loss: 0.3594 - val_accuracy: 0.8762 better than BN before activation
+
+    # build a model with BN layer BEFORE the activation function
+    print("build a model with BN layer BEFORE the activation function")
+    model = keras.models.Sequential([
+        keras.layers.Flatten(input_shape=[28, 28]),
+        keras.layers.BatchNormalization(),
+        keras.layers.Dense(300, use_bias=False),  # there is a bias(offset) param in BN, no need to add one into Dense
+        keras.layers.BatchNormalization(),
+        keras.layers.Activation("relu"),  # the BN layer is BEFORE the activation function which is a separate layer
+        keras.layers.Dense(100, use_bias=False),
+        keras.layers.BatchNormalization(),
+        keras.layers.Activation("relu"),
+        keras.layers.Dense(10, activation="softmax")
+    ])
+
+    model.compile(loss="sparse_categorical_crossentropy",
+                  optimizer=keras.optimizers.SGD(lr=1e-3),
+                  metrics=["accuracy"])
+
+    bn_before_act_history = model.fit(X_train, y_train, epochs=10, validation_data=(X_valid, y_valid))
+    # loss: 0.4363 - accuracy: 0.8500 - val_loss: 0.3880 - val_accuracy: 0.8680 worse than BN after activation
+
+    # Gradient Clipping
+
+    optimizer = keras.optimizers.SGD(clipvalue=1.0)  # all values in loss's gradient vector will be in (-1, 1)
+    model.compile(loss="mse", optimizer=optimizer)
+
+    optimizer_norm = keras.optimizers.SGD(clipnorm=1.0)
+    # clip the value in gradient vector only if this direction 's l2 norm is greater than the value clipnorm=1
