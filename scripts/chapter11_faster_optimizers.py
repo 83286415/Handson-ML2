@@ -75,3 +75,5 @@ if __name__ == '__main__':
     optimizer = keras.optimizers.SGD(lr=0.001, momentum=0.9)  # It's easy to add momentum optimizer. Just add this para.
 
     # Nesterov Accelerated Gradient
+
+    optimizer = keras.optimizers.SGD(lr=0.001, momentum=0.9, nesterov=True)
