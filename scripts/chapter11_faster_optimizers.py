@@ -17,7 +17,6 @@ import os
 
 # Chapter imports
 
-
 # to make this notebook's output stable across runs
 np.random.seed(42)
 
@@ -72,8 +71,17 @@ if __name__ == '__main__':
 
     # Momentum Optimization
 
-    optimizer = keras.optimizers.SGD(lr=0.001, momentum=0.9)  # It's easy to add momentum optimizer. Just add this para.
+    optimizer_momentum = keras.optimizers.SGD(lr=0.001, momentum=0.9)  # It's easy to add momentum optimizer. Just add this para.
 
     # Nesterov Accelerated Gradient
 
-    optimizer = keras.optimizers.SGD(lr=0.001, momentum=0.9, nesterov=True)
+    optimizer_nesterov = keras.optimizers.SGD(lr=0.001, momentum=0.9, nesterov=True)
+
+    # AdaGrad
+
+    optimizer_adagrad = keras.optimizers.Adagrad(lr=0.001)  # lr: learning rate
+
+    # RMSProp
+
+    optimizer_rmsprop = keras.optimizers.RMSprop(lr=0.001, rho=0.9)  # rho: the β mentioned in book
+    # prefer this RMSProp than AdaGrad above.
