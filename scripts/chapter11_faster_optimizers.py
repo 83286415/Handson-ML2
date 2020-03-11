@@ -38,6 +38,10 @@ H5_PATH = os.path.join(PROJECT_ROOT_DIR, 'h5', CHAPTER_ID)
 os.makedirs(H5_PATH, exist_ok=True)
 
 
+# backend
+K = keras.backend
+
+
 def get_run_logdir():
     import time
     run_id = time.strftime("run_%Y_%m_%d-%H_%M_%S")
@@ -65,6 +69,36 @@ def split_dataset(X, y):
     y_B = (y[y_5_or_6] == 6).astype(np.float32) # If shirt (==6), y_B[i]=1, or =0
     return ((X[~y_5_or_6], y_A),
             (X[y_5_or_6], y_B))
+
+
+# power scheduling
+def power_decay(_lr0, _decay, _n_steps_per_epoch):
+    def _power_decay_fn(epoch):
+        return _lr0 / (1 + epoch * _n_steps_per_epoch * _decay)
+    return _power_decay_fn
+
+
+# exponential scheduling
+def exponential_decay(lr0, s):  # s: the number of batches in one epoch, maybe 20
+    def exponential_decay_fn(epoch):
+        return lr0 * 0.1**(epoch / s)
+    return exponential_decay_fn
+
+
+# update lr at each iteration (batch) NOT epoch, so need to re-write the callback class
+class ExponentialDecay(keras.callbacks.Callback):
+    def __init__(self, s=40000):
+        super().__init__()
+        self.s = s  # s here is not the number of batches in one epoch but the total number of batches in training
+
+    def on_batch_begin(self, batch, logs=None):
+        # Note: the `batch` argument is reset at each epoch
+        lr = K.get_value(self.model.optimizer.lr)
+        K.set_value(self.model.optimizer.lr, lr * 0.1**(1 / self.s))  # change s into self.s
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        logs['lr'] = K.get_value(self.model.optimizer.lr)
 
 
 if __name__ == '__main__':
@@ -119,7 +153,7 @@ if __name__ == '__main__':
     X_test_scaled = (X_test - pixel_means) / pixel_stds
 
     # optimizer
-    optimizer = keras.optimizers.SGD(lr=0.01, decay=1e-4)
+    optimizer = keras.optimizers.SGD(lr=0.01, decay=1e-4)  # set the decay value to make the power schedule
 
     # build model
     model = keras.models.Sequential([
@@ -131,8 +165,11 @@ if __name__ == '__main__':
     model.compile(loss="sparse_categorical_crossentropy", optimizer=optimizer, metrics=["accuracy"])
 
     n_epochs = 25
-    history = model.fit(X_train_scaled, y_train, epochs=n_epochs,
-                        validation_data=(X_valid_scaled, y_valid))
+    power_schedule_history = model.fit(X_train_scaled, y_train, epochs=n_epochs,
+                                       validation_data=(X_valid_scaled, y_valid))
+    # loss: 0.2034 - accuracy: 0.9281 - val_loss: 0.3142 - val_accuracy: 0.8900
+
+    model.evaluate(X_test, y_test)  # loss: 0.6491 - accuracy: 0.7272
 
     # plot
     learning_rate = 0.01
@@ -146,10 +183,108 @@ if __name__ == '__main__':
     plt.axis([0, n_epochs - 1, 0, 0.01])
     plt.xlabel("Epoch")
     plt.ylabel("Learning Rate")
-    plt.title("Power Scheduling", fontsize=14)
+    plt.title("Keras's Power Scheduling", fontsize=14)
     plt.grid(True)
 
     save_fig("power_scheduling")
     # plt.show()
 
+    # my own power scheduler
+    lr0 = 0.01
+    decay = 1e-4
+    batch_size = 32
+    n_steps_per_epoch = len(X_train) // batch_size
+
+    power_decay_fn = power_decay(_lr0=lr0, _decay=decay, _n_steps_per_epoch=n_steps_per_epoch)
+    my_optimizer = keras.optimizers.SGD(lr=0.01)  # without decay defined here, so it's not a power schedule in Keras
+
+    model = keras.models.Sequential([
+        keras.layers.Flatten(input_shape=[28, 28]),
+        keras.layers.Dense(300, activation="selu", kernel_initializer="lecun_normal"),
+        keras.layers.Dense(100, activation="selu", kernel_initializer="lecun_normal"),
+        keras.layers.Dense(10, activation="softmax")
+    ])
+    model.compile(loss="sparse_categorical_crossentropy", optimizer=my_optimizer, metrics=["accuracy"])
+
+    lr_scheduler = keras.callbacks.LearningRateScheduler(power_decay_fn)
+
+    n_epochs = 25
+    my_power_scheduler_history = model.fit(X_train_scaled, y_train, epochs=n_epochs,
+                                           validation_data=(X_valid_scaled, y_valid),
+                                           callbacks=[lr_scheduler])  # add lr scheduler to make power scheduler
+    # loss: 0.2022 - accuracy: 0.9295 - val_loss: 0.3193 - val_accuracy: 0.8874
+
+    model.evaluate(X_test, y_test)  # loss: 0.6994 - accuracy: 0.6830 It's not good ...
+
+    # plot
+    plt.figure(figsize=(6.4, 4.8))
+    plt.plot(my_power_scheduler_history.epoch, my_power_scheduler_history.history["lr"], "o-")
+    plt.axis([0, n_epochs - 1, 0, 0.011])
+    plt.xlabel("Epoch")
+    plt.ylabel("Learning Rate")
+    plt.title("My Power Scheduling", fontsize=14)
+    plt.grid(True)
+    # plt.show()
+
     # Exponential Scheduling
+
+    # callback: exponential schedule
+    exponential_decay_fn = exponential_decay(lr0=0.01, s=20)  # if s=n_epochs = 25 that's ok
+
+    model = keras.models.Sequential([
+        keras.layers.Flatten(input_shape=[28, 28]),
+        keras.layers.Dense(300, activation="selu", kernel_initializer="lecun_normal"),
+        keras.layers.Dense(100, activation="selu", kernel_initializer="lecun_normal"),
+        keras.layers.Dense(10, activation="softmax")
+    ])
+    model.compile(loss="sparse_categorical_crossentropy", optimizer="nadam", metrics=["accuracy"])  # not self-defined
+    n_epochs = 25
+
+    lr_scheduler = keras.callbacks.LearningRateScheduler(exponential_decay_fn)
+    exponential_schedule_history = model.fit(X_train_scaled, y_train, epochs=n_epochs,
+                                             validation_data=(X_valid_scaled, y_valid),
+                                             callbacks=[lr_scheduler])  # add exponential schedule call back
+
+    # plot
+    plt.figure(figsize=(6.4, 4.8))
+    plt.plot(exponential_schedule_history.epoch, exponential_schedule_history.history["lr"], "o-")
+    plt.axis([0, n_epochs - 1, 0, 0.011])
+    plt.xlabel("Epoch")
+    plt.ylabel("Learning Rate")
+    plt.title("Exponential Scheduling", fontsize=14)
+    plt.grid(True)
+    # plt.show()
+
+    # rewrite the callback class to update lr at each batch not epoch
+    model = keras.models.Sequential([
+        keras.layers.Flatten(input_shape=[28, 28]),
+        keras.layers.Dense(300, activation="selu", kernel_initializer="lecun_normal"),
+        keras.layers.Dense(100, activation="selu", kernel_initializer="lecun_normal"),
+        keras.layers.Dense(10, activation="softmax")
+    ])
+    lr0 = 0.01
+    optimizer = keras.optimizers.Nadam(lr=lr0)
+    model.compile(loss="sparse_categorical_crossentropy", optimizer=optimizer, metrics=["accuracy"])
+    n_epochs = 25
+
+    s = 20 * len(X_train) // 32  # number of steps in 20 epochs (batch size = 32) also s==1/decay
+    exp_decay = ExponentialDecay(s)  # rewrite the callback class to update lr at each batch not epoch
+    history = model.fit(X_train_scaled, y_train, epochs=n_epochs,
+                        validation_data=(X_valid_scaled, y_valid),
+                        callbacks=[exp_decay])
+
+    # plot
+    n_steps = n_epochs * len(X_train) // 32  # the total steps of all epochs
+    steps = np.arange(n_steps)
+    lrs = lr0 * 0.1 ** (steps / s)
+
+    plt.figure(figsize=(6.4, 4.8))
+    plt.plot(steps, lrs, "-", linewidth=2)
+    plt.axis([0, n_steps - 1, 0, lr0 * 1.1])
+    plt.xlabel("Batch")
+    plt.ylabel("Learning Rate")
+    plt.title("Exponential Scheduling (per batch)", fontsize=14)
+    plt.grid(True)
+    plt.show()
+
+    # Piecewise Constant Scheduling
