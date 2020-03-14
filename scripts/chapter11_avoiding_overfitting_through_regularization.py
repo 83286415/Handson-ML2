@@ -184,6 +184,16 @@ class OneCycleScheduler(keras.callbacks.Callback):
         K.set_value(self.model.optimizer.lr, rate)
 
 
+class MCDropout(keras.layers.Dropout):
+    def call(self, inputs):
+        return super().call(inputs, training=True)
+
+
+class MCAlphaDropout(keras.layers.AlphaDropout):
+    def call(self, inputs):
+        return super().call(inputs, training=True)
+
+
 if __name__ == '__main__':
 
     # data set
@@ -259,6 +269,7 @@ if __name__ == '__main__':
     tf.random.set_random_seed(42)
     np.random.seed(42)
 
+    # Alpha Dropout needs to work with SELU activation
     model = keras.models.Sequential([
         keras.layers.Flatten(input_shape=[28, 28]),
         keras.layers.AlphaDropout(rate=0.2),
@@ -277,3 +288,45 @@ if __name__ == '__main__':
 
     model.evaluate(X_test_scaled, y_test)  # [0.45350628316402436, 0.868] more loss and fewer accuracy
     model.evaluate(X_train_scaled, y_train)  # [0.335701530437036, 0.88872725]
+
+    # MC Dropout
+
+    tf.random.set_random_seed(42)
+    np.random.seed(42)
+
+    # code from book
+    mc_model = keras.models.Sequential(
+        [MCAlphaDropout(layer.rate) if isinstance(layer, keras.layers.AlphaDropout)
+         else layer for layer in model.layers])  # replace regular Dropout with MC Dropout layer
+    print(mc_model.summary())
+
+    optimizer = keras.optimizers.SGD(lr=0.01, momentum=0.9, nesterov=True)
+    mc_model.compile(loss="sparse_categorical_crossentropy", optimizer=optimizer, metrics=["accuracy"])
+
+    mc_model.set_weights(model.get_weights())  # no need to fit again
+    # MC Dropout model needs the average prediction.
+    np.round(np.mean([mc_model.predict(X_test_scaled[:1]) for sample in range(100)], axis=0), 2)
+
+    # how to use MC Dropout
+    mnist = tf.keras.datasets.mnist
+
+    (x_train, y_train), (x_test, y_test) = mnist.load_data()
+    x_train, x_test = x_train / 255.0, x_test / 255.0
+
+    inp = keras.layers.Input(shape=(28, 28))
+    x = keras.layers.Flatten()(inp)
+    x = keras.layers.Dense(512, activation=tf.nn.relu)(x)
+    x = keras.layers.Dropout(0.5)(x, training=True)  # dropout is active in training and prediction
+    out = keras.layers.Dense(10, activation="softmax")(x)
+    model = keras.Model(inp, out)
+
+    model.compile(optimizer='adam',
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    model.fit(x_train, y_train, epochs=3)
+    # dropout is active while the whole prediction. so results are different.
+    for _ in range(10):
+        print(model.predict(x_test[:1]))  # need the average prediction probabilites
+
+    # Max-Norm Regularization
