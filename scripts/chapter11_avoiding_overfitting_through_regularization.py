@@ -329,4 +329,27 @@ if __name__ == '__main__':
     for _ in range(10):
         print(model.predict(x_test[:1]))  # need the average prediction probabilites
 
-    # Max-Norm Regularization
+    # Max-Norm Regularization    Max norm
+
+    # how to use max norm in Keras
+    layer = keras.layers.Dense(100, activation="selu", kernel_initializer="lecun_normal",
+                               kernel_constraint=keras.constraints.max_norm(1.))
+    # max_norm(1., axis=[0,1,2...]) default axis=0 in Dense. And axis should be changed in convolutional layers
+
+    # partial() with max norm
+    MaxNormDense = partial(keras.layers.Dense,
+                           activation="selu", kernel_initializer="lecun_normal",
+                           kernel_constraint=keras.constraints.max_norm(1.))  # partial(layer type, params args...)
+    # also the para "bias_constraint=" can be added into this partial to constrain the bias in layers
+
+    model = keras.models.Sequential([
+        keras.layers.Flatten(input_shape=[28, 28]),
+        MaxNormDense(300),  # max norm does can also reduce gradient explode/vanish problem as BN can.
+        MaxNormDense(100),
+        keras.layers.Dense(10, activation="softmax")
+    ])
+    model.compile(loss="sparse_categorical_crossentropy", optimizer="nadam", metrics=["accuracy"])
+
+    n_epochs = 2
+    history = model.fit(X_train_scaled, y_train, epochs=n_epochs,
+                        validation_data=(X_valid_scaled, y_valid))
