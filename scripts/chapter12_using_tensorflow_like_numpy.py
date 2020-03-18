@@ -132,3 +132,74 @@ if __name__ == '__main__':
     # <tf.Tensor: id=34, shape=(3, 2), dtype=float32, numpy=array([[11., 26.],[14., 35.],[19., 46.]], dtype=float32)>>
 
     # From/To NumPy
+
+    # from Numpy
+    np_array = np.array([2., 4., 5.])
+    from_np = tf.constant(np_array)
+    print(from_np.numpy)  # np array -> tensor
+    # <bound method _EagerTensorBase.numpy of <tf.Tensor: id=35, shape=(3,), dtype=float64, numpy=array([2., 4., 5.])>>
+    # alert: notice its dtype is float64 in np. So make sure set dtype=tf.float32 when change it into a tensor.
+
+    # to Numpy
+    to_np = from_np.numpy()  # two ways to transfer tensor -> np array
+    print(to_np)  # array([2. 4. 5.], dtype=float64)
+    to_np = np.array(from_np, dtype='float32')
+    print(to_np.dtype)  # dtype=float32
+
+    # Conflicting Types
+
+    try:
+        tf.constant(2.0) + tf.constant(40)  # float + int32 = error
+    except tf.errors.InvalidArgumentError as ex:  # different types make error when their tensor add
+        print(ex)
+        # cannot compute AddV2 as input #1(zero-based) was expected to be a float tensor
+        # but is a int32 tensor [Op:AddV2] name: add/
+
+    try:
+        tf.constant(2.0) + tf.constant(40., dtype=tf.float64)  # float + double float = error!
+    except tf.errors.InvalidArgumentError as ex:  # different precisions make error when their tensor add
+        print(ex)
+        # cannot compute AddV2 as input #1(zero-based) was expected to be a float tensor
+        # but is a double tensor [Op:AddV2] name: add/
+
+    t2 = tf.constant(40., dtype=tf.float64)  # change the default precision 32bit to 64bit
+    t_add_result = tf.constant(2.0) + tf.cast(t2, tf.float32)  # change back to 32bit and add
+    print(t_add_result)  # tf.Tensor(42.0, shape=(), dtype=float32) <dtype: 'float32'>
+
+    # Variables
+
+    v = tf.Variable([[1., 2., 3.], [4., 5., 6.]])
+
+    print(v.assign(2 * v))
+    # <tf.Variable 'UnreadVariable' shape=(2, 3) dtype=float32,
+    # numpy=array([[ 2.,  4.,  6.], [ 8., 10., 12.]], dtype=float32)>  default dtype is float32 not float64!
+
+    print(v[0, 1].assign(42))
+    # <tf.Variable 'UnreadVariable' shape=(2, 3) dtype=float32,
+    # numpy=array([[ 2., 42.,  6.], [ 8., 10., 12.]], dtype=float32)>
+
+    print(v[:, 2].assign([0., 1.]))
+    # <tf.Variable 'UnreadVariable' shape=(2, 3) dtype=float32,
+    # numpy=array([[ 2., 42.,  0.], [ 8., 10.,  1.]], dtype=float32)>
+
+    try:
+        v[1] = [7., 8., 9.]  # cannot modify values without assign(), scatter_update() or scatter_nd_update() method
+    except TypeError as ex:
+        print(ex)  # 'ResourceVariable' object does not support item assignment
+
+    print(v.scatter_nd_update(indices=[[0, 0], [1, 2]], updates=[100., 200.]))
+    # <tf.Variable 'UnreadVariable' shape=(2, 3) dtype=float32,
+    # numpy=array([[100.,  42.,   0.], [  8.,  10., 200.]], dtype=float32)>
+
+    sparse_delta = tf.IndexedSlices(values=[[1., 2., 3.], [4., 5., 6.]], indices=[1, 0])  # prepare index and values
+    print(v.scatter_update(sparse_delta))
+    # <tf.Variable 'UnreadVariable' shape=(2, 3) dtype=float32,
+    # numpy=array([[4., 5., 6.], [1., 2., 3.]], dtype=float32)>
+
+    # Other Data Structures
+
+    # Strings
+
+    # String Arrays
+
+    #
