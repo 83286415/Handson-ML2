@@ -200,6 +200,215 @@ if __name__ == '__main__':
 
     # Strings
 
+    print(tf.constant(b"hello world"))  # tf.Tensor(b'hello world', shape=(), dtype=string)  No shape for string tensor
+    print(tf.constant("café"))  # tf.Tensor(b'caf\xc3\xa9', shape=(), dtype=string)  unicode -> utf8
+    print(tf.constant("汉字"))  # tf.Tensor(b'\xe6\xb1\x89\xe5\xad\x97', shape=(), dtype=string)  unicode -> utf8
+
+    # string no shape, but int32 gets shape
+    char_unicode_2_int32 = tf.constant([ord(c) for c in "café"])  # char(unicode) -> int32
+    print(char_unicode_2_int32)  # tf.Tensor([ 99  97 102 233], shape=(4,), dtype=int32)  Got shape for int32
+
+    # switch int32/unicode(utf8) by tf.strings
+    int32_2_utf8 = tf.strings.unicode_encode(char_unicode_2_int32, "UTF-8")  # int32 -> unicode but into utf8 auto
+    print(int32_2_utf8)  # tf.Tensor(b'caf\xc3\xa9', shape=(), dtype=string)  # utf8
+    print(tf.strings.length(int32_2_utf8, unit="UTF8_CHAR"))  # get length: tf.Tensor(4, shape=(), dtype=int32)
+
+    unicode_2_int32 = tf.strings.unicode_decode(int32_2_utf8, "UTF-8")  # utf8(unicode) decoded into int32
+    print(unicode_2_int32)
+    # <tf.Tensor: id=50, shape=(4,), dtype=int32, numpy=array([ 99,  97, 102, 233], dtype=int32)>
+
     # String Arrays
 
-    #
+    # create a string array
+    string_array = tf.constant(["Café", "Coffee", "caffè", "咖啡"])  # an array of strings above
+    print(string_array)  # string array get shape of the array not strings
+    # tf.Tensor([b'Caf\xc3\xa9' b'Coffee' b'caff\xc3\xa8' b'\xe5\x92\x96\xe5\x95\xa1'], shape=(4,), dtype=string)
+    print(tf.strings.length(string_array, unit="UTF8_CHAR"))  # length: tf.Tensor([4 6 5 2], shape=(4,), dtype=int32)
+
+    # transfer string array (tensor) into a Ragged Tensor with int32 type by tf.strings
+    string_array_2_int32_ragged_tensor = tf.strings.unicode_decode(string_array, "UTF8")
+    print(string_array_2_int32_ragged_tensor)
+    # <tf.RaggedTensor [[67, 97, 102, 233], [67, 111, 102, 102, 101, 101], [99, 97, 102, 102, 232], [21654, 21857]]>
+
+    # Ragged Tensors
+
+    # difference between tensor and ragged tensor
+    print(string_array_2_int32_ragged_tensor[1])  # tf.Tensor([ 67 111 102 102 101 101], shape=(6,), dtype=int32)
+    print(string_array_2_int32_ragged_tensor[1:3])
+    # <tf.RaggedTensor [[67, 111, 102, 102, 101, 101], [99, 97, 102, 102, 232]]>
+
+    # create ragged tensor and its operation
+    ragged_tensor = tf.ragged.constant([[65, 66], [], [67]])
+    print(tf.concat([string_array_2_int32_ragged_tensor, ragged_tensor], axis=0))
+    # <tf.RaggedTensor
+    # [[67, 97, 102, 233], [67, 111, 102, 102, 101, 101], [99, 97, 102, 102, 232], [21654, 21857], [65, 66], [], [67]]>
+
+    ragged_tensor_2 = tf.ragged.constant([[68, 69, 70], [71], [72, 73]])
+    print(tf.concat([ragged_tensor, ragged_tensor_2], axis=1))  # the last axis: concat each tensor by order
+    # <tf.RaggedTensor [[65, 66, 68, 69, 70], [71], [67, 72, 73]]>
+
+    # ragged tensor to tensor in unicode
+    ragged_tensor_2_string_array = tf.strings.unicode_encode(ragged_tensor_2, "UTF-8")
+    print(ragged_tensor_2_string_array)  # tf.Tensor([b'DEF' b'G' b'HI'], shape=(3,), dtype=string)
+
+    # ragged tensor to tensor in int32
+    ragged_tensor_2_int32_tensor = string_array_2_int32_ragged_tensor.to_tensor()
+    print(ragged_tensor_2_int32_tensor)  # zeros padding the ragged tensors for their different shapes
+    '''tf.Tensor(
+                [[   67    97   102   233     0     0]
+                 [   67   111   102   102   101   101]
+                 [   99    97   102   102   232     0]
+                 [21654 21857     0     0     0     0]], shape=(4, 6), dtype=int32)'''
+
+    # Sparse Tensor
+
+    # define a sparse tensor
+    sparse_tensor = tf.SparseTensor(indices=[[0, 1], [1, 0], [2, 3]], values=[1., 2., 3.], dense_shape=[3, 4])
+    print(sparse_tensor)
+    # SparseTensor(
+    # indices=tf.Tensor([[0 1] [1 0] [2 3]], shape=(3, 2), dtype=int64),
+    # values=tf.Tensor([1. 2. 3.], shape=(3,), dtype=float32),
+    # dense_shape=tf.Tensor([3 4], shape=(2,), dtype=int64))
+
+    # sparse to dense
+    sparse_2_dense = tf.sparse.to_dense(sparse_tensor)
+    print(sparse_2_dense)
+    '''tf.Tensor(
+                [[0. 1. 0. 0.]
+                 [2. 0. 0. 0.]
+                 [0. 0. 0. 3.]], shape=(3, 4), dtype=float32)'''  # dense can be shown but sparse cannot. they are same.
+
+    # operations
+    sparse_tensor_2 = sparse_tensor * 2  # sparse tensor: the type of tensors can operated
+    print(sparse_tensor_2)  # values are doubled
+    # SparseTensor(
+    # indices=tf.Tensor([[0 1] [1 0] [2 3]], shape=(3, 2), dtype=int64),
+    # values=tf.Tensor([2. 4. 6.], shape=(3,), dtype=float32),
+    # dense_shape=tf.Tensor([3 4], shape=(2,), dtype=int64))
+
+    try:
+        sparse_2_dense_3 = sparse_tensor_2 + 1.  # different types cannot operated
+    except TypeError as ex:
+        print(ex)  # unsupported operand type(s) for +: 'SparseTensor' and 'float'
+
+    tensor_set = tf.constant([[10., 20.], [30., 40.], [50., 60.], [70., 80.]])
+    sparse_matmul = tf.sparse.sparse_dense_matmul(sparse_tensor, tensor_set)
+    print(sparse_matmul)  # shape (3, 4) * shape (4, 2) = shape (3, 2)
+    '''tf.Tensor(
+                [[ 30.  40.]
+                 [ 20.  40.]
+                 [210. 240.]], shape=(3, 2), dtype=float32)'''
+
+    # define another sparse tensor
+    another_sparse_tensor = tf.SparseTensor(indices=[[0, 2], [0, 1]], values=[1., 2.], dense_shape=[3, 4])
+    print(another_sparse_tensor)  # note: there is an indices order error will be caught below.
+    # SparseTensor(
+    # indices=tf.Tensor([[0 2][0 1]], shape=(2, 2), dtype=int64),
+    # values=tf.Tensor([1. 2.], shape=(2,), dtype=float32),
+    # dense_shape=tf.Tensor([3 4], shape=(2,), dtype=int64))
+
+    try:
+        another_sparse_2_dense = tf.sparse.to_dense(another_sparse_tensor)
+        print(another_sparse_2_dense)
+    except tf.errors.InvalidArgumentError as ex:
+        print(ex)  # indices[1] = [0,1] is out of order [Op:SparseToDense]
+        # note: the location of the second index [0, 1] has been already 0, so cannot set it 2. then error occurs.
+        # we can change the sparse indices like this [[0, 2], [1, 1]] to avoid this error or reorder it as below:
+
+    another_sparse_reorder = tf.sparse.reorder(another_sparse_tensor)
+    # reorder: does NOT change the indices params but make latter elements over-write zeros located in tensor
+    another_sparse_2_dense = tf.sparse.to_dense(another_sparse_reorder)
+    print(another_sparse_2_dense)
+    '''tf.Tensor(
+                [[0. 2. 1. 0.]
+                 [0. 0. 0. 0.]
+                 [0. 0. 0. 0.]], shape=(3, 4), dtype=float32)'''
+
+    # Sets
+
+    set1 = tf.constant([[2, 3, 5, 7], [7, 9, 0, 0]])
+    set2 = tf.constant([[4, 5, 6], [9, 10, 0]])
+    print(set2)  # set is a tensor with more than one sub-tensors
+    '''tf.Tensor(
+                [[ 4  5  6]
+                 [ 9 10  0]], shape=(2, 3), dtype=int32)'''
+
+    # sets union
+    set_1_union_2 = tf.sets.union(set1, set2)
+    print(set_1_union_2)  # sets union is a sparse tensor
+    '''
+    SparseTensor(
+        indices=tf.Tensor(
+                        [[0 0]
+                         [0 1]
+                         [0 2]
+                         [0 3]
+                         [0 4]
+                         [0 5]
+                         [1 0]
+                         [1 1]
+                         [1 2]
+                         [1 3]], shape=(10, 2), dtype=int64), 
+        values=tf.Tensor([ 2  3  4  5  6  7  0  7  9 10], shape=(10,), dtype=int32), 
+        dense_shape=tf.Tensor([2 6], shape=(2,), dtype=int64))'''
+
+    set_union_2_dense = tf.sparse.to_dense(set_1_union_2)
+    print(set_union_2_dense)
+    '''tf.Tensor(
+                [[ 2  3  4  5  6  7]
+                 [ 0  7  9 10  0  0]], shape=(2, 6), dtype=int32)'''
+
+    # sets difference
+    set_1_difference_2 = tf.sets.difference(set1, set2)
+    print(set_1_difference_2)  # sparse tensor
+    '''SparseTensor(
+            indices=tf.Tensor(
+                            [[0 0]
+                             [0 1]
+                             [0 2]
+                             [1 0]], shape=(4, 2), dtype=int64), 
+            values=tf.Tensor([2 3 7 7], shape=(4,), dtype=int32), 
+            dense_shape=tf.Tensor([2 3], shape=(2,), dtype=int64))'''
+
+    set_difference_2_dense = tf.sparse.to_dense(set_1_difference_2)
+    print(set_difference_2_dense)
+    '''tf.Tensor(
+                [[2 3 7]
+                 [7 0 0]], shape=(2, 3), dtype=int32)'''
+
+    # sets intersection
+    set_1_intersection_2 = tf.sets.intersection(set1, set2)
+    print(set_1_intersection_2)
+    '''SparseTensor(
+                indices=tf.Tensor(
+                                [[0 0]
+                                 [1 0]
+                                 [1 1]], shape=(3, 2), dtype=int64), 
+                values=tf.Tensor([5 0 9], shape=(3,), dtype=int32), 
+                dense_shape=tf.Tensor([2 2], shape=(2,), dtype=int64))'''
+
+    set_intersection_2_dense = tf.sparse.to_dense(set_1_intersection_2)
+    print(set_intersection_2_dense)
+    '''tf.Tensor(
+                [[5 0]
+                 [0 9]], shape=(2, 2), dtype=int32)'''
+
+    # Tensor Array
+
+    # define a tensor array
+    array = tf.TensorArray(dtype=tf.float32, size=3, clear_after_read=False)
+    array = array.write(0, tf.constant([1., 2.]))
+    array = array.write(1, tf.constant([3., 10.]))
+    array = array.write(2, tf.constant([5., 7.]))
+
+    print(array.read(1))  # tf.Tensor([ 3. 10.], shape=(2,), dtype=float32)
+    print(array.stack())  # return a stacked tensor
+    '''tf.Tensor(
+                [[1. 2.]
+                 [ 3. 10.] # if the para clear_after_read=True in TensorArray(), this value should be [0. 0.]
+                 [5. 7.]], shape=(3, 2), dtype=float32)'''
+
+    mean, variance = tf.nn.moments(array.stack(), axes=0)  # return mean and variance
+    # axes=1 return mean and variance of each sub-tensor in array.stack()
+    print(mean)  # tf.Tensor([3.        6.3333335], shape=(2,), dtype=float32)
+    print(variance)  # tf.Tensor([ 2.6666667 10.888888 ], shape=(2,), dtype=float32)
