@@ -196,7 +196,7 @@ if __name__ == '__main__':
     # <tf.Variable 'UnreadVariable' shape=(2, 3) dtype=float32,
     # numpy=array([[4., 5., 6.], [1., 2., 3.]], dtype=float32)>
 
-    # Other Data Structures
+    # Other Data Structures: refer to Appendix F in the book
 
     # Strings
 
