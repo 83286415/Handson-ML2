@@ -60,9 +60,20 @@ def save_fig(fig_id, tight_layout=True, fig_extension="png", resolution=300):
 
 
 def save_model(model, model_id, h5_extension="h5"):
-    path = os.path.join(H5_PATH, model_id + "." + h5_extension)
-    print("Saving model", model_id)
+    if model_id.endswith('h5'):
+        path = os.path.join(H5_PATH, model_id)
+    else:
+        path = os.path.join(H5_PATH, model_id + "." + h5_extension)
+    print("Saving model", path)
     model.save(path)
+
+
+def load_model(model_id, **kwargs):
+    if not model_id.endswith('h5'):
+        model_id = model_id + ".h5"
+    if not os.path.exists(model_id):
+        model_id = os.path.join(H5_PATH, model_id)
+    return keras.models.load_model(model_id, **kwargs)
 
 
 def huber_fn(y_true, y_pred):  # return a squared loss or a linear loss, which depends on the condition is_smaller_error
@@ -75,6 +86,65 @@ def huber_fn(y_true, y_pred):  # return a squared loss or a linear loss, which d
     # b5-1584694162-0-AZSkNGdAz0O5WaNc0a6UFBR2s2oYMxGTOQsrXb-IANWOcdFkZ-i83hCtYDztNzcGBoKKKqLFi4ZdgQjNTjIspMk_ILqScIV9Ak
     # aPzV_Srb90SS1bWktWe2Kq1d1geiWZSBTAekp6OcLX5LA5ds4zBOcn4n3gLVOAeJc4Euq6Fi9BnqpO99jNK0EZe49CB7Z2Nrn7su3Agtc2BILcNztE
     # Gll5ShuC2BUJdujMy_PNFu-2UZzKpNWlJ9I1NwCg5adBkaQMWHlJ2aethRZow6bH05BOY2uxeDSB16XDq1vLem93_9RGBZfFLgyyD9Rfful-TQ
+
+
+def create_huber(threshold=1.0):  #
+    def huber_fn(y_true, y_pred):
+        error = y_true - y_pred
+        is_small_error = tf.abs(error) < threshold
+        squared_loss = tf.square(error) / 2
+        linear_loss  = threshold * tf.abs(error) - threshold**2 / 2
+        return tf.where(is_small_error, squared_loss, linear_loss)
+    return huber_fn
+
+
+class HuberLoss(keras.losses.Loss):
+    def __init__(self, threshold=1.0, **kwargs):  # input the new param and the other params from parent class
+        self.threshold = threshold
+        super().__init__(**kwargs)
+
+    def call(self, y_true, y_pred):  # the def huber_fun()
+        error = y_true - y_pred
+        is_small_error = tf.abs(error) < self.threshold
+        squared_loss = tf.square(error) / 2
+        linear_loss = self.threshold * tf.abs(error) - self.threshold**2 / 2
+        return tf.where(is_small_error, squared_loss, linear_loss)
+
+    def get_config(self):  # when saving models, get_config() is called to save configs as JSON into h5 files.
+        base_config = super().get_config()  # get the dict from the parent's which mapping {params: values}
+        return {**base_config, "threshold": self.threshold}  # add this new param
+
+
+# customized activation function: equivalent to keras.activations.softplus() or tf.nn.softplus()
+def my_softplus(z):  # return value is just tf.nn.softplus(z)
+    return tf.math.log(tf.exp(z) + 1.0)
+
+
+# customized initializer: equivalent to keras.initializers.glorot_normal()
+def my_glorot_initializer(shape, dtype=tf.float32):
+    stddev = tf.sqrt(2. / (shape[0] + shape[1]))
+    return tf.random.normal(shape, stddev=stddev, dtype=dtype)
+
+
+# customized regularizer: equivalent to keras.regularizers.l1(0.01)
+def my_l1_regularizer(weights):
+    return tf.reduce_sum(tf.abs(0.01 * weights))
+
+
+# customized constraint function: equivalent to keras.constraints.nonneg() or tf.nn.relu()
+def my_positive_weights(weights):  # return value is just tf.nn.relu(weights)
+    return tf.where(weights < 0., tf.zeros_like(weights), weights)
+
+
+class MyL1Regularizer(keras.regularizers.Regularizer):
+    def __init__(self, factor):
+        self.factor = factor
+
+    def __call__(self, weights):
+        return tf.reduce_sum(tf.abs(self.factor * weights))
+
+    def get_config(self):
+        return {"factor": self.factor}
 
 
 if __name__ == '__main__':
@@ -126,3 +196,92 @@ if __name__ == '__main__':
 
     # Saving and Loading Models That Contain Custom Components
 
+    # save the model last session defined
+    save_model(model, "my_model_with_a_custom_loss")
+
+    # load
+    model = load_model("my_model_with_a_custom_loss.h5",
+                       custom_objects={"huber_fn": huber_fn})  # but cannot custom threshold in huber_fn()
+
+    # define another huber function to custom threshold input
+    model.compile(loss=create_huber(2.0), optimizer="nadam", metrics=["mae"])  # now we can custom threshold in huber
+    model.fit(X_train_scaled, y_train, epochs=2, validation_data=(X_valid_scaled, y_valid))
+
+    # save
+    save_model(model, "my_model_with_a_custom_loss_threshold_2")
+
+    # load
+    model = load_model("my_model_with_a_custom_loss_threshold_2.h5",
+                       custom_objects={"huber_fn": create_huber(2.0)})  # but cannot save param's value in model
+    model.fit(X_train_scaled, y_train, epochs=2, validation_data=(X_valid_scaled, y_valid))
+
+    # define a class to hold threshold config when saving a model
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="selu", kernel_initializer="lecun_normal",
+                           input_shape=input_shape),
+        keras.layers.Dense(1),
+    ])
+
+    model.compile(loss=HuberLoss(2.), optimizer="nadam", metrics=["mae"])  # add loss class with threshold param
+    model.fit(X_train_scaled, y_train, epochs=2, validation_data=(X_valid_scaled, y_valid))
+
+    # save
+    save_model(model, "my_model_with_a_custom_loss_class")  # save the model with loss threshold
+
+    # load (commit it out for now this bug is not fixed in Keras yet. refer to RP25956)
+    # model = load_model("my_model_with_a_custom_loss_class.h5",
+    #                    custom_objects={"HuberLoss": HuberLoss})
+    # print(model.loss.threshold)   # now we can retrieve params value after load the model
+
+    # Other Custom Functions
+
+    layer = keras.layers.Dense(1, activation=my_softplus,
+                               kernel_initializer=my_glorot_initializer,
+                               kernel_regularizer=my_l1_regularizer,
+                               kernel_constraint=my_positive_weights)  # all components are customized
+
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="selu", kernel_initializer="lecun_normal",
+                           input_shape=input_shape),
+        keras.layers.Dense(1, activation=my_softplus,
+                           kernel_regularizer=my_l1_regularizer,
+                           kernel_constraint=my_positive_weights,
+                           kernel_initializer=my_glorot_initializer),
+    ])
+
+    model.compile(loss="mse", optimizer="nadam", metrics=["mae"])
+    model.fit(X_train_scaled, y_train, epochs=2, validation_data=(X_valid_scaled, y_valid))
+
+    # save and load
+    save_model(model, "my_model_with_many_custom_parts.h5")
+    model = load_model(
+                        "my_model_with_many_custom_parts.h5",
+                        custom_objects={
+                            "my_l1_regularizer": my_l1_regularizer,
+                            "my_positive_weights": lambda: my_positive_weights,  # tf.wherer returns a tf object
+                            "my_glorot_initializer": my_glorot_initializer,
+                            "my_softplus": my_softplus,
+                        })
+
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="selu", kernel_initializer="lecun_normal",
+                           input_shape=input_shape),
+        keras.layers.Dense(1, activation=my_softplus,
+                           kernel_regularizer=MyL1Regularizer(0.01),  # customized regularizer class with param input
+                           kernel_constraint=my_positive_weights,
+                           kernel_initializer=my_glorot_initializer),
+    ])
+
+    model.compile(loss="mse", optimizer="nadam", metrics=["mae"])
+    model.fit(X_train_scaled, y_train, epochs=2, validation_data=(X_valid_scaled, y_valid))
+
+    # save and load
+    save_model(model, "my_model_with_many_custom_parts.h5")
+    model = load_model(
+                        "my_model_with_many_custom_parts.h5",
+                        custom_objects={
+                            "MyL1Regularizer": MyL1Regularizer,
+                            "my_positive_weights": lambda: my_positive_weights,
+                            "my_glorot_initializer": my_glorot_initializer,
+                            "my_softplus": my_softplus,
+                        })
