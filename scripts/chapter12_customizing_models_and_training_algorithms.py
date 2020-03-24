@@ -147,6 +147,49 @@ class MyL1Regularizer(keras.regularizers.Regularizer):
         return {"factor": self.factor}
 
 
+class HuberMetric(keras.metrics.Metric):
+    def __init__(self, threshold=1.0, **kwargs):
+        super().__init__(**kwargs) # handles base args (e.g., dtype)
+        self.threshold = threshold
+        # self.huber_fn = create_huber(threshold) # TODO: investigate why this fails
+        self.total = self.add_weight("total", initializer="zeros")
+        self.count = self.add_weight("count", initializer="zeros")
+
+    def huber_fn(self, y_true, y_pred): # workaround
+        error = y_true - y_pred
+        is_small_error = tf.abs(error) < self.threshold
+        squared_loss = tf.square(error) / 2
+        linear_loss = self.threshold * tf.abs(error) - self.threshold**2 / 2
+        return tf.where(is_small_error, squared_loss, linear_loss)
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        metric = self.huber_fn(y_true, y_pred)
+        self.total.assign_add(tf.reduce_sum(metric))
+        self.count.assign_add(tf.cast(tf.size(y_true), tf.float32))
+
+    def result(self):
+        return self.total / self.count
+
+    def get_config(self):
+        base_config = super().get_config()
+        return {**base_config, "threshold": self.threshold}
+
+
+class HuberMetricSimple(keras.metrics.Mean):  # a simple version of HuberMetric
+    def __init__(self, threshold=1.0, name='HuberMetric', dtype=None):
+        self.threshold = threshold
+        self.huber_fn = create_huber(threshold)
+        super().__init__(name=name, dtype=dtype)
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        metric = self.huber_fn(y_true, y_pred)
+        super(HuberMetric, self).update_state(metric, sample_weight)
+
+    def get_config(self):
+        base_config = super().get_config()
+        return {**base_config, "threshold": self.threshold}
+
+
 if __name__ == '__main__':
 
     # Custom Loss Functions
@@ -285,3 +328,47 @@ if __name__ == '__main__':
                             "my_glorot_initializer": my_glorot_initializer,
                             "my_softplus": my_softplus,
                         })
+
+    # Custom Metrics
+
+    precision = keras.metrics.Precision()
+    precision([0, 1, 1, 1, 0, 1, 0, 1], [1, 1, 0, 1, 0, 1, 0, 1])
+    print(precision([0, 1, 0, 0, 1, 0, 1, 1], [1, 0, 1, 1, 0, 0, 0, 0]))  # tf.Tensor(0.5, shape=(), dtype=float32)
+    print(precision.result())  # tf.Tensor(0.5, shape=(), dtype=float32)
+    print(precision.variables)
+    # [<tf.Variable 'true_positives:0' shape=(1,) dtype=float32, numpy=array([4.], dtype=float32)>,
+    # <tf.Variable 'false_positives:0' shape=(1,) dtype=float32, numpy=array([4.], dtype=float32)>]
+    precision.reset_states()
+
+    # Streaming Metrics
+    m = HuberMetric(2.)
+
+    # m test:
+    # total = 2 * |10 - 2| - 2²/2 = 14
+    # count = 1
+    # result = 14 / 1 = 14
+    # print(m(tf.constant([[2.]]), tf.constant([[10.]])))
+
+    # m test:
+    # total = total + (|1 - 0|² / 2) + (2 * |9.25 - 5| - 2² / 2) = 14 + 7 = 21
+    # count = count + 2 = 3
+    # result = total / count = 21 / 3 = 7
+    m(tf.constant([[0.], [5.]]), tf.constant([[1.], [9.25]]))
+    print(m.result())
+    print(m.variables)
+    m.reset_states()  # reset to check the variables list
+    print(m.variables)
+
+    # build a model
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="selu", kernel_initializer="lecun_normal", input_shape=input_shape),
+        keras.layers.Dense(1),
+    ])
+    model.compile(loss=create_huber(2.0), optimizer="nadam", metrics=[HuberMetric(2.0)])
+    model.fit(X_train_scaled.astype(np.float32), y_train.astype(np.float32), epochs=2)
+
+    save_model(model, "my_model_with_a_custom_metric.h5")
+    # model.fit(X_train_scaled.astype(np.float32), y_train.astype(np.float32), epochs=2)
+    print(model.metrics[0].threshold)  # 2.0
+
+    # Custom Layers
