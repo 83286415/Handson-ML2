@@ -190,6 +190,62 @@ class HuberMetricSimple(keras.metrics.Mean):  # a simple version of HuberMetric
         return {**base_config, "threshold": self.threshold}
 
 
+# single input layer class
+class MyDense(keras.layers.Layer):  # refer to "Custom Layer" in my cloud note
+    def __init__(self, units, activation=None, **kwargs):
+        super().__init__(**kwargs)
+        self.units = units
+        self.activation = keras.activations.get(activation)
+
+    def build(self, batch_input_shape):
+        self.kernel = self.add_weight(
+            name="kernel", shape=[batch_input_shape[-1], self.units],
+            initializer="glorot_normal")
+        self.bias = self.add_weight(
+            name="bias", shape=[self.units], initializer="zeros")
+        super().build(batch_input_shape) # must be at the end
+
+    def call(self, X):
+        return self.activation(X @ self.kernel + self.bias)
+
+    def compute_output_shape(self, batch_input_shape):
+        return tf.TensorShape(batch_input_shape.as_list()[:-1] + [self.units])
+
+    def get_config(self):
+        base_config = super().get_config()
+        return {**base_config, "units": self.units,
+                "activation": keras.activations.serialize(self.activation)}
+
+
+# multi output layer class
+class MyMultiLayer(keras.layers.Layer):  # refer to "Custom Layer" in my cloud note
+
+    def call(self, X):
+        X1, X2 = X
+        return X1 + X2, X1 * X2
+
+    def compute_output_shape(self, batch_input_shape):
+        batch_input_shape1, batch_input_shape2 = batch_input_shape
+        return [batch_input_shape1, batch_input_shape2]
+
+
+# create a layer class with a different behavior during training and testing
+class AddGaussianNoise(keras.layers.Layer):  # refer to "Custom Layer" in my cloud note
+    def __init__(self, stddev, **kwargs):
+        super().__init__(**kwargs)
+        self.stddev = stddev
+
+    def call(self, X, training=None):
+        if training:
+            noise = tf.random.normal(tf.shape(X), stddev=self.stddev)
+            return X + noise  # only add noise in training process
+        else:
+            return X
+
+    def compute_output_shape(self, batch_input_shape):
+        return batch_input_shape
+
+
 if __name__ == '__main__':
 
     # Custom Loss Functions
@@ -372,3 +428,39 @@ if __name__ == '__main__':
     print(model.metrics[0].threshold)  # 2.0
 
     # Custom Layers
+
+    # activation="exponential" also can be like this layer:
+    exponential_layer = keras.layers.Lambda(lambda x: tf.exp(x))
+
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="relu", input_shape=input_shape),
+        keras.layers.Dense(1),  # activation="exponential" in this layer can replace exponential_layer below
+        exponential_layer
+    ])
+    model.compile(loss="mse", optimizer="nadam")
+    model.fit(X_train_scaled, y_train, epochs=5,
+              validation_data=(X_valid_scaled, y_valid))
+    model.evaluate(X_test_scaled, y_test)
+
+    # custom single input layer
+    model = keras.models.Sequential([
+        MyDense(30, activation="relu", input_shape=input_shape),
+        MyDense(1)
+    ])
+
+    model.compile(loss="mse", optimizer="nadam")
+    model.fit(X_train_scaled, y_train, epochs=2,
+              validation_data=(X_valid_scaled, y_valid))
+    model.evaluate(X_test_scaled, y_test)
+
+    save_model(model, "my_model_with_a_custom_layer.h5")
+
+    # custom multi input layer
+    inputs1 = keras.layers.Input(shape=[2])
+    inputs2 = keras.layers.Input(shape=[2])
+    outputs1, outputs2 = MyMultiLayer()((inputs1, inputs2))
+
+    model.compile(loss="mse", optimizer="nadam")  # i think it's NOT correct here
+    model.fit(X_train_scaled, y_train, epochs=2,
+              validation_data=(X_valid_scaled, y_valid))
+    model.evaluate(X_test_scaled, y_test)
