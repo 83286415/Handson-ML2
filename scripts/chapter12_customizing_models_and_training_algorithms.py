@@ -246,6 +246,7 @@ class AddGaussianNoise(keras.layers.Layer):  # refer to "Custom Layer" in my clo
         return batch_input_shape
 
 
+# Custom Models
 class ResidualBlock(keras.layers.Layer):
     def __init__(self, n_layers, n_neurons, **kwargs):
         super().__init__(**kwargs)
@@ -287,6 +288,35 @@ class ResidualRegressor(keras.models.Model):
         base_config = super().get_config()
         return {**base_config,
                 "output_dim": self.output_dim}
+
+
+# Losses and Metrics Based on Model Internals
+class ReconstructingRegressor(keras.models.Model):
+    def __init__(self, output_dim, **kwargs):
+        super().__init__(**kwargs)
+        self.hidden = [keras.layers.Dense(30, activation="selu",
+                                          kernel_initializer="lecun_normal")
+                       for _ in range(5)]
+        self.out = keras.layers.Dense(output_dim)
+        # TODO: check https://github.com/tensorflow/tensorflow/issues/26260
+        #self.reconstruction_mean = keras.metrics.Mean(name="reconstruction_error")
+
+    def build(self, batch_input_shape):
+        n_inputs = batch_input_shape[-1]
+        self.reconstruct = keras.layers.Dense(n_inputs)
+        super().build(batch_input_shape)
+
+    def call(self, inputs, training=None):
+        Z = inputs
+        for layer in self.hidden:
+            Z = layer(Z)
+        reconstruction = self.reconstruct(Z)
+        recon_loss = tf.reduce_mean(tf.square(reconstruction - inputs))
+        self.add_loss(0.05 * recon_loss)
+        #if training:
+        #    result = self.reconstruction_mean(recon_loss)
+        #    self.add_metric(result)
+        return self.out(Z)
 
 
 if __name__ == '__main__':
@@ -523,4 +553,11 @@ if __name__ == '__main__':
     # model = keras.models.load_model("my_custom_model.ckpt")
 
     # Losses and Metrics Based on Model Internals
+
+    model = ReconstructingRegressor(1)
+    model.compile(loss="mse", optimizer="nadam")
+    history_reconstruction = model.fit(X_train_scaled, y_train, epochs=2)
+    y_pred_reconstruction = model.predict(X_test_scaled)
+
+    # Computing Gradients with Autodiff
 
