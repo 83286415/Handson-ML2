@@ -246,6 +246,49 @@ class AddGaussianNoise(keras.layers.Layer):  # refer to "Custom Layer" in my clo
         return batch_input_shape
 
 
+class ResidualBlock(keras.layers.Layer):
+    def __init__(self, n_layers, n_neurons, **kwargs):
+        super().__init__(**kwargs)
+        self.n_layers = n_layers  # not shown in the book
+        self.n_neurons = n_neurons  # not shown
+        self.hidden = [keras.layers.Dense(n_neurons, activation="elu",
+                                          kernel_initializer="he_normal")
+                       for _ in range(n_layers)]
+
+    def call(self, inputs):
+        Z = inputs
+        for layer in self.hidden:
+            Z = layer(Z)
+        return inputs + Z
+
+    def get_config(self):  # to support save() and load() function
+        base_config = super().get_config()
+        return {**base_config, "n_layers": self.n_layers, "n_neurons": self.n_neurons}
+
+
+class ResidualRegressor(keras.models.Model):
+    def __init__(self, output_dim, **kwargs):
+        super().__init__(**kwargs)
+        self.output_dim = output_dim                                 # not shown in the book
+        self.hidden1 = keras.layers.Dense(30, activation="elu",
+                                          kernel_initializer="he_normal")
+        self.block1 = ResidualBlock(2, 30)
+        self.block2 = ResidualBlock(2, 30)
+        self.out = keras.layers.Dense(output_dim)
+
+    def call(self, inputs):
+        Z = self.hidden1(inputs)
+        for _ in range(1 + 3):
+            Z = self.block1(Z)
+        Z = self.block2(Z)
+        return self.out(Z)
+
+    def get_config(self):  # to support save() and load() function
+        base_config = super().get_config()
+        return {**base_config,
+                "output_dim": self.output_dim}
+
+
 if __name__ == '__main__':
 
     # Custom Loss Functions
@@ -464,3 +507,20 @@ if __name__ == '__main__':
     model.fit(X_train_scaled, y_train, epochs=2,
               validation_data=(X_valid_scaled, y_valid))
     model.evaluate(X_test_scaled, y_test)
+
+    # Custom Models
+
+    # data set
+    X_new_scaled = X_test_scaled
+
+    model = ResidualRegressor(1)
+    model.compile(loss="mse", optimizer="nadam")
+    history = model.fit(X_train_scaled, y_train, epochs=5)
+    score = model.evaluate(X_test_scaled, y_test)
+    y_pred = model.predict(X_new_scaled)
+
+    # save_model(model, "my_custom_model.ckpt")  # not supported for now
+    # model = keras.models.load_model("my_custom_model.ckpt")
+
+    # Losses and Metrics Based on Model Internals
+
