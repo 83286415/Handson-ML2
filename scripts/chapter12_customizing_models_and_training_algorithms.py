@@ -319,6 +319,25 @@ class ReconstructingRegressor(keras.models.Model):
         return self.out(Z)
 
 
+# used to test autodiff for computing gradient
+def f(w1, w2):
+    return 3 * w1 ** 2 + 2 * w1 * w2
+
+
+def f(w1, w2):  # stop gradients from back propagating
+    return 3 * w1 ** 2 + tf.stop_gradient(2 * w1 * w2)
+
+
+# to handle the large inputs problem
+@tf.custom_gradient
+def my_better_softplus(z):
+    exp = tf.exp(z)
+
+    def my_softplus_gradients(grad):
+        return grad / (1 + 1 / exp)
+    return tf.math.log(exp + 1), my_softplus_gradients
+
+
 if __name__ == '__main__':
 
     # Custom Loss Functions
@@ -560,4 +579,104 @@ if __name__ == '__main__':
     y_pred_reconstruction = model.predict(X_test_scaled)
 
     # Computing Gradients with Autodiff
+
+    # autodiff
+    w1, w2 = tf.Variable(5.), tf.Variable(3.)  # w1: the partial derivative value at 5
+    with tf.GradientTape() as tape:  # tape: a context to record every operation that involves a variable
+        z = f(w1, w2)
+
+    gradients = tape.gradient(z, [w1, w2])  # compute gradients
+    print(gradients)
+    # [<tf.Tensor: id=54074, shape=(), dtype=float32, numpy=36.0>,
+    # <tf.Tensor: id=54066, shape=(), dtype=float32, numpy=10.0>]  # the gradient value at w2 is 10
+
+    # gradient() can be called only once:
+    with tf.GradientTape() as tape:
+        z = f(w1, w2)
+
+    dz_dw1 = tape.gradient(z, w1)
+    try:
+        dz_dw2 = tape.gradient(z, w2)
+    except RuntimeError as ex:
+        print(ex)
+
+    # make gradient() called twice with del tape
+    with tf.GradientTape(persistent=True) as tape:
+        z = f(w1, w2)
+
+    dz_dw1 = tape.gradient(z, w1)
+    dz_dw2 = tape.gradient(z, w2)  # works now!
+    del tape
+    print(dz_dw1)
+    print(dz_dw2)
+
+    # gradient() only works with variable not constant
+    c1, c2 = tf.constant(5.), tf.constant(3.)
+    with tf.GradientTape() as tape:
+        z = f(c1, c2)
+
+    gradients = tape.gradient(z, [c1, c2])
+    print(gradients)
+
+    # watch(): to record every operation involves any tensor in watch()
+    with tf.GradientTape() as tape:
+        tape.watch(c1)
+        tape.watch(c2)
+        z = f(c1, c2)
+
+    gradients = tape.gradient(z, [c1, c2])
+    print(gradients)
+
+    # different operations
+    with tf.GradientTape() as tape:
+        z1 = f(w1, w2 + 2.)
+        z2 = f(w1, w2 + 5.)
+        z3 = f(w1, w2 + 7.)
+
+    gradients = tape.gradient([z1, z2, z3], [w1, w2])
+    print(gradients)
+
+    with tf.GradientTape(persistent=True) as tape:
+        z1 = f(w1, w2 + 2.)
+        z2 = f(w1, w2 + 5.)
+        z3 = f(w1, w2 + 7.)
+
+    gradients = tf.reduce_sum(tf.stack([tape.gradient(z, [w1, w2]) for z in (z1, z2, z3)]), axis=0)
+    del tape
+    print(gradients)
+
+    with tf.GradientTape(persistent=True) as hessian_tape:
+        with tf.GradientTape() as jacobian_tape:
+            z = f(w1, w2)
+        jacobians = jacobian_tape.gradient(z, [w1, w2])
+    hessians = [hessian_tape.gradient(jacobian, [w1, w2])
+                for jacobian in jacobians]
+    del hessian_tape
+    print(jacobians)
+    print(hessians)
+
+    # gradient with stopping it from back propagating
+    with tf.GradientTape() as tape:
+        z = f(w1, w2)
+
+    gradients = tape.gradient(z, [w1, w2])
+    print(gradients)
+
+    # the problem with computing gradients of a def for a large inputs
+    x = tf.Variable(100.)
+    with tf.GradientTape() as tape:
+        z = my_softplus(x)
+
+    gradients = tape.gradient(z, [x])
+    print(gradients)
+
+    # to avoid the large inputs problem with a @
+    x = tf.Variable([1000.])
+    with tf.GradientTape() as tape:
+        z = my_better_softplus(x)
+
+    print(z)
+    print(tape.gradient(z, [x]))
+
+    # Computing Gradients Using Autodiff
 
