@@ -19,6 +19,7 @@ import os
 from sklearn.datasets import fetch_california_housing
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+import time
 
 # to make this notebook's output stable across runs
 np.random.seed(42)
@@ -324,7 +325,7 @@ def f(w1, w2):
     return 3 * w1 ** 2 + 2 * w1 * w2
 
 
-def f(w1, w2):  # stop gradients from back propagating
+def f_stop(w1, w2):  # stop gradients from back propagating
     return 3 * w1 ** 2 + tf.stop_gradient(2 * w1 * w2)
 
 
@@ -336,6 +337,27 @@ def my_better_softplus(z):
     def my_softplus_gradients(grad):
         return grad / (1 + 1 / exp)
     return tf.math.log(exp + 1), my_softplus_gradients
+
+
+def random_batch(X, y, batch_size=32):  # return batch index randomly
+    idx = np.random.randint(len(X), size=batch_size)
+    return X[idx], y[idx]
+
+
+def progress_bar(iteration, total, size=30):
+    running = iteration < total
+    c = ">" if running else "="
+    p = (size - 1) * iteration // total
+    fmt = "{{:-{}d}}/{{}} [{{}}]".format(len(str(total)))
+    params = [iteration, total, "=" * p + c + "." * (size - p - 1)]
+    return fmt.format(*params)
+
+
+def print_status_bar(iteration, total, loss, metrics=None, size=30):
+    metrics = " - ".join(["{}: {:.4f}".format(m.name, m.result())
+                         for m in [loss] + (metrics or [])])
+    end = "" if iteration < total else "\n"
+    print("\r{} - {}".format(progress_bar(iteration, total), metrics), end=end)
 
 
 if __name__ == '__main__':
@@ -588,7 +610,7 @@ if __name__ == '__main__':
     gradients = tape.gradient(z, [w1, w2])  # compute gradients
     print(gradients)
     # [<tf.Tensor: id=54074, shape=(), dtype=float32, numpy=36.0>,
-    # <tf.Tensor: id=54066, shape=(), dtype=float32, numpy=10.0>]  # the gradient value at w2 is 10
+    # <tf.Tensor: id=54066, shape=(), dtype=float32, numpy=10.0>]  # the gradient tensor at point (5, 2) is (36, 10)
 
     # gradient() can be called only once:
     with tf.GradientTape() as tape:
@@ -598,7 +620,7 @@ if __name__ == '__main__':
     try:
         dz_dw2 = tape.gradient(z, w2)
     except RuntimeError as ex:
-        print(ex)
+        print(ex)  # GradientTape.gradient can only be called once on non-persistent tapes.
 
     # make gradient() called twice with del tape
     with tf.GradientTape(persistent=True) as tape:
@@ -607,8 +629,8 @@ if __name__ == '__main__':
     dz_dw1 = tape.gradient(z, w1)
     dz_dw2 = tape.gradient(z, w2)  # works now!
     del tape
-    print(dz_dw1)
-    print(dz_dw2)
+    print(dz_dw1)  # tf.Tensor(36.0, shape=(), dtype=float32)
+    print(dz_dw2)  # tf.Tensor(10.0, shape=(), dtype=float32)
 
     # gradient() only works with variable not constant
     c1, c2 = tf.constant(5.), tf.constant(3.)
@@ -616,16 +638,18 @@ if __name__ == '__main__':
         z = f(c1, c2)
 
     gradients = tape.gradient(z, [c1, c2])
-    print(gradients)
+    print(gradients)  # [None, None]
 
     # watch(): to record every operation involves any tensor in watch()
     with tf.GradientTape() as tape:
-        tape.watch(c1)
-        tape.watch(c2)
+        tape.watch(c1)  # here c1 is as input tensor, a constant not a variable
+        tape.watch(c2)  # watch() can watch any type of tensor.
         z = f(c1, c2)
 
     gradients = tape.gradient(z, [c1, c2])
-    print(gradients)
+    print(gradients)  # c1 and c2 are constant but they are can be computed gradients with for adding tape.watch()
+    # [<tf.Tensor: id=93726, shape=(), dtype=float32, numpy=36.0>,
+    #  <tf.Tensor: id=93718, shape=(), dtype=float32, numpy=10.0>]
 
     # different operations
     with tf.GradientTape() as tape:
@@ -635,32 +659,30 @@ if __name__ == '__main__':
 
     gradients = tape.gradient([z1, z2, z3], [w1, w2])
     print(gradients)
+    # [<tf.Tensor: id=54241, shape=(), dtype=float32, numpy=136.0>,
+    # <tf.Tensor: id=54242, shape=(), dtype=float32, numpy=30.0>]
 
-    with tf.GradientTape(persistent=True) as tape:
-        z1 = f(w1, w2 + 2.)
-        z2 = f(w1, w2 + 5.)
-        z3 = f(w1, w2 + 7.)
-
-    gradients = tf.reduce_sum(tf.stack([tape.gradient(z, [w1, w2]) for z in (z1, z2, z3)]), axis=0)
-    del tape
-    print(gradients)
-
-    with tf.GradientTape(persistent=True) as hessian_tape:
-        with tf.GradientTape() as jacobian_tape:
+    # compute the second derivative
+    with tf.GradientTape(persistent=True) as hessian_tape:  # the second
+        with tf.GradientTape() as jacobian_tape:  # the first
             z = f(w1, w2)
         jacobians = jacobian_tape.gradient(z, [w1, w2])
-    hessians = [hessian_tape.gradient(jacobian, [w1, w2])
-                for jacobian in jacobians]
+    hessians = [hessian_tape.gradient(jacobian, [w1, w2]) for jacobian in jacobians]
     del hessian_tape
     print(jacobians)
+    # [<tf.Tensor: id=54266, shape=(), dtype=float32, numpy=36.0>,
+    # <tf.Tensor: id=54258, shape=(), dtype=float32, numpy=10.0>]
     print(hessians)
+    # [[<tf.Tensor: id=54275, shape=(), dtype=float32, numpy=6.0>,
+    # <tf.Tensor: id=54277, shape=(), dtype=float32, numpy=2.0>],
+    # [<tf.Tensor: id=54282, shape=(), dtype=float32, numpy=2.0>, None]]
 
     # gradient with stopping it from back propagating
     with tf.GradientTape() as tape:
-        z = f(w1, w2)
+        z = f_stop(w1, w2)
 
     gradients = tape.gradient(z, [w1, w2])
-    print(gradients)
+    print(gradients)  # [<tf.Tensor: id=54302, shape=(), dtype=float32, numpy=30.0>, None]
 
     # the problem with computing gradients of a def for a large inputs
     x = tf.Variable(100.)
@@ -668,15 +690,94 @@ if __name__ == '__main__':
         z = my_softplus(x)
 
     gradients = tape.gradient(z, [x])
-    print(gradients)
+    print(gradients)  # [<tf.Tensor: id=54318, shape=(), dtype=float32, numpy=nan>]  the large input problem: return nan
 
     # to avoid the large inputs problem with a @
     x = tf.Variable([1000.])
     with tf.GradientTape() as tape:
         z = my_better_softplus(x)
-
-    print(z)
-    print(tape.gradient(z, [x]))
+    print(z)  # tf.Tensor([inf], shape=(1,), dtype=float32)  the normal output still explodes for this large input
+    gradients = tape.gradient(z, [x])  # but it can return a proper gradient value: 1
+    print(gradients)  # [<tf.Tensor: id=54340, shape=(1,), dtype=float32, numpy=array([1.], dtype=float32)>]
 
     # Computing Gradients Using Autodiff
 
+    # build a model and not compile it for we will handle the training loop manually
+    l2_reg = keras.regularizers.l2(0.05)
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="elu", kernel_initializer="he_normal",
+                           kernel_regularizer=l2_reg),
+        keras.layers.Dense(1, kernel_regularizer=l2_reg)
+    ])  # we may add some constraint params like kernel_constraint, bias_constraint
+
+    # test the print_status_bar()
+    mean_loss = keras.metrics.Mean(name="loss")
+    mean_square = keras.metrics.Mean(name="mean_square")
+    for i in range(1, 50 + 1):
+        loss = 1 / i
+        mean_loss(loss)
+        mean_square(i ** 2)
+        print_status_bar(i, 50, mean_loss, [mean_square])
+        time.sleep(0.05)
+
+    # define params
+    n_epochs = 5
+    batch_size = 32
+    n_steps = len(X_train) // batch_size
+    optimizer = keras.optimizers.Nadam(lr=0.01)
+    loss_fn = keras.losses.mean_squared_error
+    mean_loss = keras.metrics.Mean()
+    metrics = [keras.metrics.MeanAbsoluteError()]
+
+    # custom training loop in the book: refer to my cloud note and searching "Custom Training Loops"
+    for epoch in range(1, n_epochs + 1):
+        print("Epoch {}/{}".format(epoch, n_epochs))
+        for step in range(1, n_steps + 1):
+            X_batch, y_batch = random_batch(X_train_scaled, y_train)
+            with tf.GradientTape() as tape:
+                y_pred = model(X_batch)
+                main_loss = tf.reduce_mean(loss_fn(y_batch, y_pred))
+                loss = tf.add_n([main_loss] + model.losses)
+            gradients = tape.gradient(loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            for variable in model.variables:
+                if variable.constraint is not None:
+                    variable.assign(variable.constraint(variable))
+            mean_loss(loss)
+            for metric in metrics:
+                metric(y_batch, y_pred)
+            print_status_bar(step * batch_size, len(y_train), mean_loss, metrics)
+        print_status_bar(len(y_train), len(y_train), mean_loss, metrics)
+        for metric in [mean_loss] + metrics:
+            metric.reset_states()
+
+    # a fancier process bar to show the training loop's progress
+    try:
+        from tqdm import tnrange
+        from collections import OrderedDict
+
+        with tnrange(1, n_epochs + 1, desc="All epochs") as epochs:
+            for epoch in epochs:
+                with tnrange(1, n_steps + 1, desc="Epoch {}/{}".format(epoch, n_epochs)) as steps:
+                    for step in steps:
+                        X_batch, y_batch = random_batch(X_train_scaled, y_train)
+                        with tf.GradientTape() as tape:
+                            y_pred = model(X_batch)
+                            main_loss = tf.reduce_mean(loss_fn(y_batch, y_pred))
+                            loss = tf.add_n([main_loss] + model.losses)
+                        gradients = tape.gradient(loss, model.trainable_variables)
+                        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+                        for variable in model.variables:
+                            if variable.constraint is not None:
+                                variable.assign(variable.constraint(variable))
+                        status = OrderedDict()
+                        mean_loss(loss)
+                        status["loss"] = mean_loss.result().numpy()
+                        for metric in metrics:
+                            metric(y_batch, y_pred)
+                            status[metric.name] = metric.result().numpy()
+                        steps.set_postfix(status)
+                for metric in [mean_loss] + metrics:
+                    metric.reset_states()
+    except ImportError as ex:
+        print("To run this cell, please install tqdm, ipywidgets and restart Jupyter")
