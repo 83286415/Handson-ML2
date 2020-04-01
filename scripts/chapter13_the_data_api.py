@@ -102,7 +102,7 @@ def preprocess(line):
     defs = [0.] * n_inputs + [tf.constant([], dtype=tf.float32)]  # 9 elements: eight 0 and a constant tensor
     print(defs)  # [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, <tf.Tensor 'Const:0' shape=(0,) dtype=float32>]
     fields = tf.io.decode_csv(line, record_defaults=defs)
-    x = tf.stack(fields[:-1])
+    x = tf.stack(fields[:-1])  # x should be a 1D tensor but the last tensor in fields as it is the target y
     y = tf.stack(fields[-1:])
     return (x - X_mean) / X_std, y
 
@@ -273,32 +273,38 @@ if __name__ == '__main__':
             b'3.3456,37.0,4.514084507042254,0.9084507042253521,458.0,3.2253521126760565,36.67,-121.7,2.526'
             b'3.5214,15.0,3.0499445061043287,1.106548279689234,1447.0,1.6059933407325193,37.63,-122.43,1.442'''
 
+    # default values of each column in csv file:
     record_defaults = [0, np.nan, tf.constant(np.nan, dtype=tf.float64), "Hello", tf.constant([])]
-    parsed_fields = tf.io.decode_csv('1,2,3,4,5', record_defaults)
+
+    parsed_fields = tf.io.decode_csv('1,2,3,4,5', record_defaults)  # decode_csv(line_parsed, default_values_each_col)
     print(parsed_fields)
-    # [<tf.Tensor: id=234, shape=(), dtype=int32, numpy=1>, <tf.Tensor: id=235, shape=(), dtype=float32, numpy=2.0>,
-    # <tf.Tensor: id=236, shape=(), dtype=float64, numpy=3.0>, <tf.Tensor: id=237, shape=(), dtype=string, numpy=b'4'>,
+    # [<tf.Tensor: id=234, shape=(), dtype=int32, numpy=1>,
+    # <tf.Tensor: id=235, shape=(), dtype=float32, numpy=2.0>,
+    # <tf.Tensor: id=236, shape=(), dtype=float64, numpy=3.0>,
+    # <tf.Tensor: id=237, shape=(), dtype=string, numpy=b'4'>,
     # <tf.Tensor: id=238, shape=(), dtype=float32, numpy=5.0>]
 
-    parsed_fields = tf.io.decode_csv(',,,,5', record_defaults)
+    parsed_fields = tf.io.decode_csv(',,,,5', record_defaults)  # decode_csv returns a list of scalar tensors
     print(parsed_fields)
-    # [<tf.Tensor: id=243, shape=(), dtype=int32, numpy=0>, <tf.Tensor: id=244, shape=(), dtype=float32, numpy=nan>,
-    # <tf.Tensor: id=245, shape=(), dtype=float64, numpy=nan>, <tf.Tensor: id=246, shape=(), dtype=string,
-    # numpy=b'Hello'>, <tf.Tensor: id=247, shape=(), dtype=float32, numpy=5.0>]
+    # [<tf.Tensor: id=243, shape=(), dtype=int32, numpy=0>,
+    # <tf.Tensor: id=244, shape=(), dtype=float32, numpy=nan>,
+    # <tf.Tensor: id=245, shape=(), dtype=float64, numpy=nan>,
+    # <tf.Tensor: id=246, shape=(), dtype=string, numpy=b'Hello'>,
+    # <tf.Tensor: id=247, shape=(), dtype=float32, numpy=5.0>]
 
     try:
-        parsed_fields = tf.io.decode_csv(',,,,', record_defaults)
+        parsed_fields = tf.io.decode_csv(',,,,', record_defaults)  # 5 default but 4 elements parsed
     except tf.errors.InvalidArgumentError as ex:
         print(ex)  # Field 4 is required but missing in record 0! [Op:DecodeCSV]
 
     try:
-        parsed_fields = tf.io.decode_csv('1,2,3,4,5,6,7', record_defaults)
+        parsed_fields = tf.io.decode_csv('1,2,3,4,5,6,7', record_defaults)  # more than 5 elements
     except tf.errors.InvalidArgumentError as ex:
         print(ex)  # Expect 5 fields but have 7 in record 0 [Op:DecodeCSV]
 
     n_inputs = 8  # X_train.shape[-1]
-    print(preprocess(b'4.2083,44.0,5.3232,0.9171,846.0,2.3370,37.47,-122.2,2.782'))
+    print(preprocess(b'4.2083,44.0,5.3232,0.9171,846.0,2.3370,37.47,-122.2,2.782'))  # return scaled x in 1D and y
     # (<tf.Tensor: id=286, shape=(8,), dtype=float32,  numpy=array([ 0.16579157,  1.216324  , -0.05204565, -0.39215982,
-    # -0.5277444 , -0.2633488 ,  0.8543046 , -1.3072058 ], dtype=float32)>, <tf.Tensor: id=287, shape=(1,),
-    # dtype=float32, numpy=array([2.782], dtype=float32)>)
+    # -0.5277444 , -0.2633488 ,  0.8543046 , -1.3072058 ], dtype=float32)>,
+    # <tf.Tensor: id=287, shape=(1,), dtype=float32, numpy=array([2.782], dtype=float32)>)
 
