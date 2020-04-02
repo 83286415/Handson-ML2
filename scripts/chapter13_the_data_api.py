@@ -98,13 +98,49 @@ def save_to_multiple_csv_files(data, name_prefix, header=None, n_parts=10):
 
 
 @tf.function
-def preprocess(line):
+def preprocess(line):  # line: a string from csv file, each element is separated by a comma
     defs = [0.] * n_inputs + [tf.constant([], dtype=tf.float32)]  # 9 elements: eight 0 and a constant tensor
     print(defs)  # [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, <tf.Tensor 'Const:0' shape=(0,) dtype=float32>]
-    fields = tf.io.decode_csv(line, record_defaults=defs)
+    fields = tf.io.decode_csv(line, record_defaults=defs)  # return a list of scalar tensor
     x = tf.stack(fields[:-1])  # x should be a 1D tensor but the last tensor in fields as it is the target y
     y = tf.stack(fields[-1:])
     return (x - X_mean) / X_std, y
+
+
+def csv_reader_dataset(filepaths, repeat=1, n_readers=5,
+                       n_read_threads=None, shuffle_buffer_size=10000,
+                       n_parse_threads=5, batch_size=32):  # shuffle + preprocess + repeat + batch + prefetch
+    dataset = tf.data.Dataset.list_files(filepaths).repeat(repeat)
+    dataset = dataset.interleave(
+        lambda filepath: tf.data.TextLineDataset(filepath).skip(1),
+        cycle_length=n_readers, num_parallel_calls=n_read_threads)
+    dataset = dataset.shuffle(shuffle_buffer_size)
+    dataset = dataset.map(preprocess, num_parallel_calls=n_parse_threads)
+    dataset = dataset.batch(batch_size)
+    return dataset.prefetch(1)
+
+
+@tf.function
+def train(model, n_epochs, batch_size=32,
+          n_readers=5, n_read_threads=5, shuffle_buffer_size=10000, n_parse_threads=5):
+    train_set = csv_reader_dataset(train_filepaths, repeat=n_epochs, n_readers=n_readers,
+                       n_read_threads=n_read_threads, shuffle_buffer_size=shuffle_buffer_size,
+                       n_parse_threads=n_parse_threads, batch_size=batch_size)
+    optimizer = keras.optimizers.Nadam(lr=0.01)
+    loss_fn = keras.losses.mean_squared_error
+    n_steps_per_epoch = len(X_train) // batch_size
+    total_steps = n_epochs * n_steps_per_epoch
+    global_step = 0
+    for X_batch, y_batch in train_set.take(total_steps):
+        global_step += 1
+        if tf.equal(global_step % 100, 0):
+            tf.print("\rGlobal step", global_step, "/", total_steps)
+        with tf.GradientTape() as tape:
+            y_pred = model(X_batch)
+            main_loss = tf.reduce_mean(loss_fn(y_batch, y_pred))
+            loss = tf.add_n([main_loss] + model.losses)
+        gradients = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
 
 if __name__ == '__main__':
@@ -137,7 +173,8 @@ if __name__ == '__main__':
             tf.Tensor([1 2 3 4 5 6 7], shape=(7,), dtype=int64)
             tf.Tensor([8 9], shape=(2,), dtype=int64)'''
 
-    dataset = dataset.map(lambda x: x * 2)
+    dataset = dataset.map(lambda x: x * 2, num_parallel_calls=5)
+    # # num_parallel_calls: number of multi-threads. If = `tf.data.experimental.AUTOTUNE`, the whole CPU will be used.
     for item in dataset:
         print(item)
         '''tf.Tensor([ 0  2  4  6  8 10 12], shape=(7,), dtype=int32)
@@ -258,12 +295,15 @@ if __name__ == '__main__':
     # list_files(shuffle=False) if do NOT want file names shuffled randomly
 
     n_readers = 5
+
+    # Interleaving lines from multiple files
     dataset = filepath_dataset.interleave(lambda filepath: tf.data.TextLineDataset(filepath).skip(1),
-                                          cycle_length=n_readers)
+                                          cycle_length=n_readers, num_parallel_calls=4)
     # interleave: cross the dataset reset by the map function lambda
     # TextLineDataset: create 5 data sets whose info from 5 files in filepath list.
     # cycle_length=AUTOTUNE, controls the number of input elements that are processed concurrently. AUTOTUNE: full CPU
     # skip: ignore the first row in files
+    # num_parallel_calls: number of multi-threads. If = `tf.data.experimental.AUTOTUNE`, the whole CPU will be used.
 
     for line in dataset.take(5):
         print(line.numpy())
@@ -308,3 +348,39 @@ if __name__ == '__main__':
     # -0.5277444 , -0.2633488 ,  0.8543046 , -1.3072058 ], dtype=float32)>,
     # <tf.Tensor: id=287, shape=(1,), dtype=float32, numpy=array([2.782], dtype=float32)>)
 
+    # make shuffle + preprocess + repeat + batch + prefetch into a function
+    train_set = csv_reader_dataset(train_filepaths, batch_size=3)
+    for X_batch, y_batch in train_set.take(2):
+        print("X =", X_batch)
+        print("y =", y_batch)  # return 2 x and y batches
+
+    # a whole process to use data api
+    train_set = csv_reader_dataset(train_filepaths, repeat=None)
+    valid_set = csv_reader_dataset(valid_filepaths)
+    test_set = csv_reader_dataset(test_filepaths)
+
+    model = keras.models.Sequential([
+        keras.layers.Dense(30, activation="relu", input_shape=X_train.shape[1:]),
+        keras.layers.Dense(1),
+    ])
+
+    model.compile(loss="mse", optimizer=keras.optimizers.SGD(lr=1e-3))
+
+    batch_size = 32
+    model.fit(train_set, steps_per_epoch=len(X_train) // batch_size, epochs=10, validation_data=valid_set)
+
+    model.evaluate(test_set, steps=len(X_test) // batch_size)
+
+    new_set = test_set.map(lambda X, y: X)  # we could instead just pass test_set, Keras would ignore the labels
+    X_new = X_test
+    model.predict(new_set, steps=len(X_new) // batch_size)
+
+    # self define a train loop
+    train(model, 5)
+
+    # print all dataset's methods:
+    for m in dir(tf.data.Dataset):
+        if not (m.startswith("_") or m.endswith("_")):  # not print _func or func_
+            func = getattr(tf.data.Dataset, m)
+            if hasattr(func, "__doc__"):
+                print("● {:21s}{}".format(m + "()", func.__doc__.split("\n")[0]))
